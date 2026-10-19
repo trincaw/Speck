@@ -1,0 +1,153 @@
+"""Configuration management and .env loader for Spek."""
+
+from __future__ import annotations
+
+import logging
+import os
+from pathlib import Path
+from typing import Callable, Optional, TypeVar
+
+logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
+
+
+def _find_env_file() -> Optional[Path]:
+    candidates = [
+        os.environ.get("SPEK_ENV_FILE"),
+        Path.cwd() / ".env",
+        Path(__file__).resolve().parents[2] / ".env",
+    ]
+    for candidate in candidates:
+        if candidate and Path(candidate).is_file():
+            return Path(candidate)
+    return None
+
+
+def _parse_value(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+        return value[1:-1]
+    # Inline comments are only stripped from unquoted values
+    return value.split(" #", 1)[0].strip() if " #" in value else value
+
+
+def load_env_file(filepath: Optional[str | Path] = None, override: bool = False) -> dict[str, str]:
+    """Parse KEY=VALUE pairs from a .env file into os.environ.
+
+    Args:
+        filepath: Path to a .env file; searches SPEK_ENV_FILE, CWD and project root if None.
+        override: Overwrite variables already present in os.environ.
+    """
+    path = Path(filepath) if filepath else _find_env_file()
+    if path is None or not path.is_file():
+        return {}
+
+    loaded: dict[str, str] = {}
+    try:
+        for raw_line in path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            line = line.removeprefix("export ").strip()
+            key, _, value = line.partition("=")
+            key = key.strip()
+            if not key:
+                continue
+            loaded[key] = _parse_value(value)
+            if override or key not in os.environ:
+                os.environ[key] = loaded[key]
+    except OSError as exc:
+        logger.warning("Could not read .env file at %s: %s", path, exc)
+    return loaded
+
+
+load_env_file()
+
+
+def env(*keys: str, default: T = None, cast: Callable[[str], T] = str) -> T:
+    """Return the first non-empty environment variable among `keys`, cast to the desired type."""
+    for key in keys:
+        value = os.environ.get(key)
+        if value:
+            try:
+                return cast(value.strip())
+            except ValueError:
+                logger.warning("Invalid value for %s=%r, using default %r", key, value, default)
+                return default
+    return default
+
+
+def get_model_name() -> str:
+    return env("SPEK_MODEL", "ASR_MODEL", default="nemotron")
+
+
+def get_device() -> Optional[str]:
+    return env("SPEK_DEVICE", "DEVICE")
+
+
+def get_dtype_str() -> Optional[str]:
+    return env("SPEK_DTYPE")
+
+
+def get_mistral_api_key() -> Optional[str]:
+    return env("MISTRAL_API_KEY")
+
+
+def get_voxtral_model() -> str:
+    return env("VOXTRAL_MODEL", "VOXTRAL_MODEL_ID", default="voxtral-mini-latest")
+
+
+def get_voxtral_backend() -> str:
+    backend = env("VOXTRAL_BACKEND", default="api").lower()
+    return backend if backend in ("api", "local") else "api"
+
+
+def get_voxtral_api_url() -> str:
+    return env("VOXTRAL_API_URL", default="https://api.mistral.ai/v1/audio/transcriptions")
+
+
+def get_sherpa_segmentation_model() -> Optional[str]:
+    return env("SPEK_SHERPA_SEGMENTATION_MODEL", "SHERPA_SEGMENTATION_MODEL")
+
+
+def get_sherpa_embedding_model() -> Optional[str]:
+    return env("SPEK_SHERPA_EMBEDDING_MODEL", "SHERPA_EMBEDDING_MODEL")
+
+
+def get_sherpa_asr_type() -> str:
+    return env("SPEK_SHERPA_ASR_TYPE", "SHERPA_ASR_TYPE", default="whisper").lower()
+
+
+def get_sherpa_asr_encoder() -> Optional[str]:
+    return env("SPEK_SHERPA_ASR_ENCODER", "SHERPA_ASR_ENCODER")
+
+
+def get_sherpa_asr_decoder() -> Optional[str]:
+    return env("SPEK_SHERPA_ASR_DECODER", "SHERPA_ASR_DECODER")
+
+
+def get_sherpa_asr_tokens() -> Optional[str]:
+    return env("SPEK_SHERPA_ASR_TOKENS", "SHERPA_ASR_TOKENS")
+
+
+def get_sherpa_num_clusters() -> int:
+    """Target number of speakers (<= 0 auto-detects)."""
+    return env("SPEK_SHERPA_NUM_CLUSTERS", "SHERPA_NUM_CLUSTERS", default=-1, cast=int)
+
+
+def get_sherpa_threshold() -> float:
+    return env("SPEK_SHERPA_THRESHOLD", "SHERPA_CLUSTERING_THRESHOLD", default=0.5, cast=float)
+
+
+def get_sherpa_tag_format() -> str:
+    return env("SPEK_SHERPA_TAG_FORMAT", "SHERPA_TAG_FORMAT", default="block").lower()
+
+
+def get_sherpa_num_threads() -> int:
+    return env("SPEK_SHERPA_NUM_THREADS", "SHERPA_NUM_THREADS", default=2, cast=int)
+
+
+def get_speaker_threshold() -> float:
+    """Cosine similarity needed to match a known speaker during live classification."""
+    return env("SPEK_SPEAKER_THRESHOLD", default=0.5, cast=float)

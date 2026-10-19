@@ -1,0 +1,168 @@
+"""Model-agnostic abstract base classes and common data structures for ASR engines."""
+
+from __future__ import annotations
+
+import time
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Callable, Generator, Optional, Union
+
+import numpy as np
+import torch
+
+from spek.utils import to_mono_float32
+
+if TYPE_CHECKING:
+    from spek.streamer import BaseAudioStreamSession
+
+AudioInput = Union[str, np.ndarray, torch.Tensor]
+
+
+@dataclass
+class TranscriptionResult:
+    """ASR transcription result metadata."""
+    text: str
+    raw_text: str
+    detected_language: Optional[str]
+    duration_seconds: float
+    inference_seconds: float
+    real_time_factor: float
+    segments: Optional[list[dict[str, Any]]] = None
+
+
+@dataclass
+class BenchmarkResult:
+    """Benchmark metrics across streaming configurations."""
+    lookahead_tokens: Union[int, str]
+    configured_latency_ms: float
+    audio_duration_seconds: float
+    elapsed_seconds: float
+    real_time_factor: float
+    transcript: str
+
+
+def rtf(elapsed: float, duration: float) -> float:
+    return elapsed / max(duration, 1e-4)
+
+
+class BaseASREngine(ABC):
+    """Abstract base class for all speech recognition engines in Spek."""
+
+    def __init__(
+        self,
+        model_id: str,
+        device: Optional[str] = None,
+        dtype: Optional[torch.dtype] = None,
+    ):
+        self.model_id = model_id
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.dtype = dtype or (torch.float16 if self.device == "cuda" else torch.float32)
+        self._is_loaded = False
+
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """Display name of the model/engine."""
+
+    @property
+    @abstractmethod
+    def sampling_rate(self) -> int:
+        """Required audio sampling rate in Hz."""
+
+    @property
+    def supported_languages(self) -> dict[str, Any]:
+        return {}
+
+    @property
+    def streaming_presets(self) -> dict[Union[int, str], dict[str, Any]]:
+        return {}
+
+    @abstractmethod
+    def load(self) -> BaseASREngine:
+        """Load model weights or API client. Must be idempotent."""
+
+    def _ensure_loaded(self) -> None:
+        if not self._is_loaded:
+            self.load()
+
+    def _prepare_audio(self, audio: AudioInput, sampling_rate: Optional[int] = None) -> tuple[np.ndarray, float]:
+        """Load and normalize audio to mono float32 at the engine's sampling rate."""
+        target_sr = sampling_rate or self.sampling_rate
+        if isinstance(audio, str):
+            from transformers.audio_utils import load_audio
+            wav = load_audio(audio, sampling_rate=target_sr)
+        elif isinstance(audio, torch.Tensor):
+            wav = audio.detach().cpu().numpy()
+        else:
+            wav = audio
+        wav = to_mono_float32(wav)
+        return wav, len(wav) / target_sr
+
+    @abstractmethod
+    def transcribe(
+        self,
+        audio: AudioInput,
+        language: str = "auto",
+        skip_special_tokens: bool = True,
+        **kwargs: Any,
+    ) -> TranscriptionResult:
+        """Offline / batch audio transcription."""
+
+    @abstractmethod
+    def stream_transcribe(
+        self,
+        audio: AudioInput,
+        language: str = "auto",
+        lookahead: int = 6,
+        skip_special_tokens: bool = True,
+        simulate_realtime: bool = False,
+        **kwargs: Any,
+    ) -> Generator[str, None, None]:
+        """Chunked streaming transcription yielding text increments."""
+
+    def create_stream_session(
+        self,
+        language: str = "auto",
+        lookahead: int = 6,
+        skip_special_tokens: bool = True,
+        on_token: Optional[Callable[[str], None]] = None,
+        **kwargs: Any,
+    ) -> BaseAudioStreamSession:
+        """Create a live push-based session. Default: VAD-segmented utterances sent to `transcribe`."""
+        from spek.streamer import UtteranceStreamSession
+        return UtteranceStreamSession(
+            engine=self,
+            language=language,
+            lookahead=lookahead,
+            skip_special_tokens=skip_special_tokens,
+            on_token=on_token,
+            **kwargs,
+        )
+
+    def benchmark(
+        self,
+        audio: AudioInput,
+        lookaheads: Optional[list[int]] = None,
+        language: str = "auto",
+    ) -> list[BenchmarkResult]:
+        """Benchmark streaming performance across preset configurations."""
+        presets = self.streaming_presets
+        lookaheads = lookaheads or [k for k in presets if isinstance(k, int)] or [0]
+        wav, duration = self._prepare_audio(audio)
+
+        results: list[BenchmarkResult] = []
+        for lookahead in lookaheads:
+            start = time.perf_counter()
+            transcript = "".join(self.stream_transcribe(wav, language=language, lookahead=lookahead))
+            elapsed = time.perf_counter() - start
+            results.append(
+                BenchmarkResult(
+                    lookahead_tokens=lookahead,
+                    configured_latency_ms=presets.get(lookahead, {}).get("latency_ms", 0.0),
+                    audio_duration_seconds=duration,
+                    elapsed_seconds=elapsed,
+                    real_time_factor=rtf(elapsed, duration),
+                    transcript=transcript.strip(),
+                )
+            )
+        return results

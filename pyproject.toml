@@ -1,0 +1,38 @@
+[project]
+name = "spek"
+version = "0.2.0"
+description = "Model-agnostic real-time ASR with live speaker classification"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "accelerate>=1.15.0",
+    "fastapi>=0.143.3",
+    "huggingface-hub>=0.20.0",
+    "librosa>=1.0.0",
+    "numpy>=1.26",
+    "onnxruntime>=1.31.0",
+    "python-multipart>=0.0.32",
+    "requests>=2.31",
+    "rich>=13.0.0",
+    "sherpa-onnx>=1.13.8",
+    "sherpa-onnx-core>=1.13.8",
+    "sounddevice>=0.5.6",
+    "soundfile>=0.14.0",
+    "torch>=2.1.0",
+    "torchaudio>=2.1.0",
+    "transformers>=5.13.0",
+    "uvicorn>=0.54.0",
+    "websockets>=17.2",
+]
+
+[project.scripts]
+spek = "spek.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.13.0,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
