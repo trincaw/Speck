@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/spek.png" alt="Spek" width="200" />
+</p>
+
 # Spek
 
 Model-agnostic speech recognition with real-time streaming and live speaker classification.
