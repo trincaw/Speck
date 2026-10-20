@@ -14,31 +14,11 @@ Model-agnostic speech recognition with real-time streaming and live speaker labe
 ## Install
 
 ```bash
-pip install spek            # library
-pip install "spek[cli]"     # + the `spek` command
+pip install spek
 ```
 
-Python 3.12+. Configure through environment variables (see [.env.example](.env.example)); the CLI loads a `.env`
-automatically, library users can call `spek.load_env_file()`.
-
-## Library
-
-```python
-from spek import get_engine, SpeakerClassifier, SpeakerEmbedder
-
-engine = get_engine("nemotron").load()      # defaults to SPEK_MODEL
-print(engine.transcribe("audio.mp3", language="en-US").text)
-
-# live: push 16 kHz mono float32 chunks, read text as it arrives
-session = engine.create_stream_session(
-    on_token=lambda t: print(t, end="", flush=True),
-    speakers=SpeakerClassifier(SpeakerEmbedder()),   # optional: label who is speaking
-).start()
-session.push_audio(chunk)
-session.finish(); session.join()
-```
-
-Add your own engine by subclassing `BaseASREngine` and calling `spek.factory.register_engine(alias, cls)`.
+Installs the `spek` command and the Python library. Python 3.12+. Configure through environment variables
+(see [.env.example](.env.example)); the CLI loads a `.env` automatically, library users can call `spek.load_env_file()`.
 
 ## CLI
 
@@ -73,6 +53,25 @@ spek mixed --speakers --save call.txt                  # --me/--remote rename la
 ```
 
 `listen` and `mixed` need PulseAudio/PipeWire (`pactl`, `parec`).
+
+## Library
+
+```python
+from spek import get_engine, SpeakerClassifier, SpeakerEmbedder
+
+engine = get_engine("nemotron").load()      # defaults to SPEK_MODEL
+print(engine.transcribe("audio.mp3", language="en-US").text)
+
+# live: push 16 kHz mono float32 chunks, read text as it arrives
+session = engine.create_stream_session(
+    on_token=lambda t: print(t, end="", flush=True),
+    speakers=SpeakerClassifier(SpeakerEmbedder()),   # optional: label who is speaking
+).start()
+session.push_audio(chunk)
+session.finish(); session.join()
+```
+
+Add your own engine by subclassing `BaseASREngine` and calling `spek.factory.register_engine(alias, cls)`.
 
 ## Tests
 

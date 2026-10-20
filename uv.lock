@@ -1286,26 +1286,18 @@ dependencies = [
     { name = "huggingface-hub" },
     { name = "numpy" },
     { name = "requests" },
+    { name = "rich" },
     { name = "sherpa-onnx" },
     { name = "sherpa-onnx-core" },
+    { name = "sounddevice" },
     { name = "soundfile" },
     { name = "torch" },
     { name = "transformers" },
 ]
 
-[package.optional-dependencies]
-audio = [
-    { name = "sounddevice" },
-]
-cli = [
-    { name = "rich" },
-    { name = "sounddevice" },
-]
-
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
-    { name = "spek", extra = ["cli"] },
 ]
 
 [package.metadata]
@@ -1314,22 +1306,17 @@ requires-dist = [
     { name = "huggingface-hub", specifier = ">=0.20.0" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "requests", specifier = ">=2.31" },
-    { name = "rich", marker = "extra == 'cli'", specifier = ">=13.0.0" },
+    { name = "rich", specifier = ">=13.0.0" },
     { name = "sherpa-onnx", specifier = ">=1.13.8" },
     { name = "sherpa-onnx-core", specifier = ">=1.13.8" },
-    { name = "sounddevice", marker = "extra == 'audio'", specifier = ">=0.5.6" },
-    { name = "sounddevice", marker = "extra == 'cli'", specifier = ">=0.5.6" },
+    { name = "sounddevice", specifier = ">=0.5.6" },
     { name = "soundfile", specifier = ">=0.14.0" },
     { name = "torch", specifier = ">=2.1.0" },
     { name = "transformers", specifier = ">=5.13.0" },
 ]
-provides-extras = ["audio", "cli"]
 
 [package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=9.1.1" },
-    { name = "spek", extras = ["cli"] },
-]
+dev = [{ name = "pytest", specifier = ">=9.1.1" }]
 
 [[package]]
 name = "sympy"
