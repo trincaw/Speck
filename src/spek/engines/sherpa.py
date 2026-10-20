@@ -2,15 +2,17 @@
 
 Offline: Pyannote segmentation + CAM++ embeddings cluster speakers, then Whisper (ONNX)
 transcribes every turn in one batched decode.
-Live: Silero VAD cuts utterances, an online classifier labels the speaker, Whisper transcribes.
+Live: Silero VAD cuts utterances, speaker changes inside them are detected, an online
+classifier labels each turn and Whisper transcribes it.
 """
 
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from pathlib import Path
-from typing import Any, Generator, Optional, Union
+from typing import Any, Callable, Generator, Optional, Union
 
 import numpy as np
 import torch
@@ -29,7 +31,14 @@ from spek.config import (
     get_sherpa_threshold,
     get_speaker_threshold,
 )
-from spek.speakers import EMBEDDING_FILE, EMBEDDING_REPO, SpeakerClassifier, SpeakerEmbedder, Utterance
+from spek.speakers import (
+    EMBEDDING_FILE,
+    EMBEDDING_REPO,
+    LiveSpeakerPreview,
+    SpeakerClassifier,
+    SpeakerEmbedder,
+    Utterance,
+)
 from spek.streamer import UtteranceStreamSession
 from spek.utils import LanguageTier, resolve_hf_file
 
@@ -94,7 +103,7 @@ class SherpaSpeakerTagger:
         segmentation_model: Optional[str] = None,
         embedding_model: Optional[str] = None,
         num_clusters: int = -1,
-        threshold: float = 0.5,
+        threshold: float = 0.9,
         min_duration_on: float = 0.2,
         min_duration_off: float = 0.3,
         num_threads: int = 2,
@@ -217,6 +226,7 @@ class SherpaOnnxASR(BaseASREngine):
         self._tagger: Optional[SherpaSpeakerTagger] = None
         self._recognizer = None
         self._embedder: Optional[SpeakerEmbedder] = None
+        self._decode_lock = threading.Lock()  # live sessions (e.g. mic + system audio) share the recognizer
 
     def _onnx_provider(self) -> str:
         if self.device != "cuda":
@@ -302,7 +312,8 @@ class SherpaOnnxASR(BaseASREngine):
             stream.accept_waveform(self.sampling_rate, chunks[i])
             streams.append(stream)
         if streams:
-            self._recognizer.decode_streams(streams)
+            with self._decode_lock:
+                self._recognizer.decode_streams(streams)
         texts = [""] * len(chunks)
         for i, stream in zip(idx, streams):
             texts[i] = stream.result.text.strip()
@@ -385,23 +396,28 @@ class SherpaOnnxASR(BaseASREngine):
         speaker_threshold: Optional[float] = None,
         max_speakers: Optional[int] = None,
         enroll: Optional[dict[str, AudioInput]] = None,
+        classify: bool = True,
         **kwargs: Any,
     ) -> SherpaLiveStreamSession:
         """Live session with VAD + online speaker classification.
 
         Args:
+            classify: False skips speaker classification (plain, untagged text).
             speaker_threshold: Cosine similarity needed to match a known speaker.
             max_speakers: Cap on discovered speakers (defaults to num_clusters when > 0).
             enroll: {name: audio} voice samples of known people, labelled by name.
+            on_speaker: Callback for live speaker events (see SherpaLiveStreamSession).
         """
         self._ensure_loaded()
-        classifier = SpeakerClassifier(
-            self.embedder,
-            threshold=get_speaker_threshold() if speaker_threshold is None else speaker_threshold,
-            max_speakers=max_speakers if max_speakers is not None else max(self.num_clusters, 0),
-        )
-        for label, audio in (enroll or {}).items():
-            classifier.enroll(label, self._prepare_audio(audio)[0])
+        classifier = None
+        if classify:
+            classifier = SpeakerClassifier(
+                self.embedder,
+                threshold=get_speaker_threshold() if speaker_threshold is None else speaker_threshold,
+                max_speakers=max_speakers if max_speakers is not None else max(self.num_clusters, 0),
+            )
+            for label, audio in (enroll or {}).items():
+                classifier.enroll(label, self._prepare_audio(audio)[0])
         return SherpaLiveStreamSession(
             engine=self,
             classifier=classifier,
@@ -412,40 +428,70 @@ class SherpaOnnxASR(BaseASREngine):
 
 
 class SherpaLiveStreamSession(UtteranceStreamSession):
-    """Live speaker-tagged transcription: VAD -> speaker classification -> Whisper."""
+    """Live speaker-tagged transcription: VAD -> speaker-change detection -> Whisper per turn.
+
+    `on_speaker(event)` receives {"label", "score", "provisional"} while someone is talking
+    (provisional, from the last couple of seconds) and, with "start"/"end"/"text", once per
+    finished turn.
+    """
 
     engine: SherpaOnnxASR
 
     def __init__(
         self,
         *args,
-        classifier: SpeakerClassifier,
+        classifier: Optional[SpeakerClassifier],
         tag_speakers: bool = True,
         tag_format: str = "block",
+        on_speaker: Optional[Callable[[dict[str, Any]], None]] = None,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
         self.classifier = classifier
-        self.tag_speakers = tag_speakers
+        self.tag_speakers = tag_speakers and classifier is not None
         self.tag_format = tag_format
+        self.on_speaker = on_speaker
         self.segments: list[dict[str, Any]] = []
         self._last_speaker: Optional[str] = None
+        self._preview = LiveSpeakerPreview(classifier, self._vad) if classifier else None
+
+    def _on_audio(self) -> None:
+        if self.on_speaker and self._preview and (match := self._preview.update()):
+            self._notify({"label": match.label, "score": round(match.score, 3), "provisional": True})
 
     def _process_utterance(self, utt: Utterance) -> str:
         text = self.engine._transcribe_batch([utt.samples])[0]
         if not text:
             return ""
-        match = self.classifier.classify(utt.samples)
-        end = utt.start + len(utt.samples) / self.sr
-        self.segments.append(
-            {"speaker": match.label, "start": round(utt.start, 2), "end": round(end, 2),
-             "score": round(match.score, 3), "text": text}
-        )
+        if self.classifier is None:
+            end = utt.start + len(utt.samples) / self.sr
+            self.segments.append({"start": round(utt.start, 2), "end": round(end, 2), "text": text})
+            return f" {text}" if self._transcript else text
+        turns = self.classifier.segment(utt.samples)
+        chunks = [utt.samples[int(t.start * self.sr) : int(t.end * self.sr)] for t in turns]
+        texts = [text] if len(turns) == 1 else self.engine._transcribe_batch(chunks)
 
-        previous, self._last_speaker = self._last_speaker, match.label
+        out = []
+        for turn, turn_text in zip(turns, texts):
+            if not turn_text:
+                continue
+            segment = {"speaker": turn.match.label, "start": round(utt.start + turn.start, 2),
+                       "end": round(utt.start + turn.end, 2), "score": round(turn.match.score, 3),
+                       "text": turn_text}
+            self.segments.append(segment)
+            self._notify({"label": segment["speaker"], "score": segment["score"], "provisional": False,
+                          "start": segment["start"], "end": segment["end"], "text": turn_text})
+            out.append(self._format(turn.match.label, turn_text))
+        for segment in self.segments:  # earlier turns of speakers merged since
+            segment["speaker"] = self.classifier.resolve(segment["speaker"])
+        return "".join(out)
+
+    def _format(self, label: str, text: str) -> str:
+        previous = self._last_speaker and self.classifier.resolve(self._last_speaker)
+        self._last_speaker = label
         if previous is None:
             separator = ""
-        elif not self.tag_speakers or previous == match.label:
+        elif not self.tag_speakers or previous == label:
             return f" {text}"
         else:
             separator = " " if self.tag_format == "inline" else "\n"
@@ -453,8 +499,16 @@ class SherpaLiveStreamSession(UtteranceStreamSession):
         if not self.tag_speakers:
             return text
         if self.tag_format == "inline":
-            return f"{separator}[{match.label}] {text}"
-        return f"{separator}[{match.label}]: {text}"
+            return f"{separator}[{label}] {text}"
+        return f"{separator}[{label}]: {text}"
+
+    def _notify(self, event: dict[str, Any]) -> None:
+        if not self.on_speaker:
+            return
+        try:
+            self.on_speaker(event)
+        except Exception as err:
+            logger.error("Error in on_speaker callback: %s", err)
 
 
 # Backward-compatible alias

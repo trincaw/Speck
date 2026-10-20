@@ -137,7 +137,7 @@ def get_sherpa_num_clusters() -> int:
 
 
 def get_sherpa_threshold() -> float:
-    return env("SPEK_SHERPA_THRESHOLD", "SHERPA_CLUSTERING_THRESHOLD", default=0.5, cast=float)
+    return env("SPEK_SHERPA_THRESHOLD", "SHERPA_CLUSTERING_THRESHOLD", default=0.9, cast=float)
 
 
 def get_sherpa_tag_format() -> str:
@@ -150,4 +150,4 @@ def get_sherpa_num_threads() -> int:
 
 def get_speaker_threshold() -> float:
     """Cosine similarity needed to match a known speaker during live classification."""
-    return env("SPEK_SPEAKER_THRESHOLD", default=0.5, cast=float)
+    return env("SPEK_SPEAKER_THRESHOLD", default=0.35, cast=float)

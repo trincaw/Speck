@@ -199,9 +199,13 @@ class UtteranceStreamSession(BaseAudioStreamSession):
             cursor += len(chunk)
             for utt in self._vad.accept(chunk):
                 self._handle(utt)
+            self._on_audio()
         if not self._stopped:
             for utt in self._vad.flush():
                 self._handle(utt)
+
+    def _on_audio(self) -> None:
+        """Called after each chunk reaches the VAD (utterances may still be in progress)."""
 
     def _handle(self, utt: Utterance) -> None:
         try:

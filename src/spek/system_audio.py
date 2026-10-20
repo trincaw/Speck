@@ -7,6 +7,7 @@ tools, so no extra Python dependencies are needed:
   when the same application is also recording from a microphone.
 - `SystemAudioCapture` records the monitor of the sink that is playing ("what you hear")
   and, during calls, mixes in the microphone ("what you say").
+- `DualCapture` records the microphone and system audio as two channels (mixed mode).
 - `SystemAudioListener` ties them together: a transcription session starts when audio
   activity starts and is finalized once the desktop has been quiet for `idle_timeout`.
 """
@@ -317,6 +318,52 @@ class SystemAudioCapture:
                 self.on_audio(self.mix(block))
             except Exception as err:
                 logger.error("System audio consumer error: %s", err)
+
+
+class DualCapture:
+    """Records the microphone and system audio as two separate channels (mixed mode)."""
+
+    def __init__(
+        self,
+        on_mic: Callable[[np.ndarray], None],
+        on_system: Callable[[np.ndarray], None],
+        mic_device: str = "@DEFAULT_SOURCE@",
+        system_device: str = "@DEFAULT_MONITOR@",
+        sample_rate: int = 16000,
+        block_ms: int = 100,
+        reader_factory: Callable[..., ParecReader] = ParecReader,
+    ):
+        self.channels = {"mic": (mic_device, on_mic), "system": (system_device, on_system)}
+        self.sample_rate = sample_rate
+        self.block_ms = block_ms
+        self._reader_factory = reader_factory
+        self._readers: list[ParecReader] = []
+        self._threads: list[threading.Thread] = []
+
+    def start(self) -> DualCapture:
+        for name, (device, consumer) in self.channels.items():
+            reader = self._reader_factory(device, sample_rate=self.sample_rate, block_ms=self.block_ms)
+            thread = threading.Thread(target=self._pump, args=(name, reader, consumer), daemon=True)
+            self._readers.append(reader)
+            self._threads.append(thread)
+            thread.start()
+        return self
+
+    def stop(self) -> None:
+        for reader in self._readers:
+            reader.close()
+        for thread in self._threads:
+            thread.join(timeout=2)
+        self._readers.clear()
+        self._threads.clear()
+
+    @staticmethod
+    def _pump(name: str, reader: ParecReader, consumer: Callable[[np.ndarray], None]) -> None:
+        while (block := reader.read()) is not None:
+            try:
+                consumer(block)
+            except Exception as err:
+                logger.error("%s audio consumer error: %s", name, err)
 
 
 # --- orchestration --------------------------------------------------------------

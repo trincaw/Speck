@@ -1,12 +1,15 @@
 """Voice activity detection and online speaker classification (sherpa-onnx).
 
-Used for live microphone streams: the VAD cuts audio into utterances, and each utterance
-is embedded and matched against known speakers (enrolled or discovered on the fly).
+Used for live streams: the VAD cuts audio into utterances, each utterance is scanned for
+speaker changes and every resulting turn is embedded and matched against known speakers
+(enrolled or discovered on the fly). While someone is still talking, `LiveSpeakerPreview`
+gives a provisional label from the most recent audio.
 """
 
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -20,7 +23,9 @@ VAD_REPO = "csukuangfj/vad"
 VAD_FILE = "silero_vad.onnx"
 
 EMBEDDING_REPO = "csukuangfj/speaker-embedding-models"
-EMBEDDING_FILE = "3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx"
+# TitaNet keeps a stable similarity scale across utterance lengths (CAM++ swings from
+# 0.2 to 0.8 between 1.5 s and 3 s clips), which a single online threshold depends on.
+EMBEDDING_FILE = "nemo_en_titanet_small.onnx"
 
 
 @dataclass
@@ -58,12 +63,21 @@ class VadSegmenter:
         self._window = cfg.silero_vad.window_size
         self._vad = sherpa_onnx.VoiceActivityDetector(cfg, buffer_size_in_seconds=max_speech + 5)
         self._pending = np.zeros(0, dtype=np.float32)
+        self._live: list[np.ndarray] = []  # windows of the utterance in progress
+        self._max_live = int((max_speech + 1) * sample_rate / self._window)
 
     def accept(self, samples: np.ndarray) -> list[Utterance]:
         buf = np.concatenate([self._pending, samples]) if len(self._pending) else samples
         n = len(buf) - len(buf) % self._window
         for i in range(0, n, self._window):
-            self._vad.accept_waveform(buf[i : i + self._window])
+            window = buf[i : i + self._window]
+            self._vad.accept_waveform(window)
+            if self._vad.is_speech_detected():
+                self._live.append(window)
+                if len(self._live) > self._max_live:
+                    del self._live[0]
+            else:
+                self._live.clear()
         self._pending = buf[n:].copy()
         return self._drain()
 
@@ -72,11 +86,22 @@ class VadSegmenter:
             self._vad.accept_waveform(np.pad(self._pending, (0, self._window - len(self._pending))))
             self._pending = np.zeros(0, dtype=np.float32)
         self._vad.flush()
+        self._live.clear()
         return self._drain()
 
     @property
     def is_speech(self) -> bool:
         return self._vad.is_speech_detected()
+
+    @property
+    def live_seconds(self) -> float:
+        """Duration of the utterance still in progress (0 when silent)."""
+        return len(self._live) * self._window / self.sample_rate
+
+    def live_audio(self, seconds: Optional[float] = None) -> np.ndarray:
+        """The most recent `seconds` of the utterance still in progress."""
+        windows = self._live if seconds is None else self._live[-max(1, int(seconds * self.sample_rate / self._window)) :]
+        return np.concatenate(windows) if windows else np.zeros(0, dtype=np.float32)
 
     def _drain(self) -> list[Utterance]:
         out = []
@@ -88,7 +113,7 @@ class VadSegmenter:
 
 
 class SpeakerEmbedder:
-    """L2-normalized speaker embeddings (CAM++ / 3D-Speaker by default)."""
+    """L2-normalized speaker embeddings (NeMo TitaNet-small by default)."""
 
     def __init__(self, model: Optional[str] = None, num_threads: int = 2, provider: str = "cpu", sample_rate: int = 16000):
         import sherpa_onnx
@@ -101,6 +126,7 @@ class SpeakerEmbedder:
         if not cfg.validate():
             raise ValueError(f"Invalid speaker embedding config: {cfg}")
         self._extractor = sherpa_onnx.SpeakerEmbeddingExtractor(cfg)
+        self._lock = threading.Lock()  # shared by concurrent live sessions
         self.sample_rate = sample_rate
         self.dim = self._extractor.dim
 
@@ -108,16 +134,18 @@ class SpeakerEmbedder:
         stream = self._extractor.create_stream()
         stream.accept_waveform(self.sample_rate, to_mono_float32(samples))
         stream.input_finished()
-        emb = np.asarray(self._extractor.compute(stream), dtype=np.float32)
+        with self._lock:
+            emb = np.asarray(self._extractor.compute(stream), dtype=np.float32)
         return emb / (np.linalg.norm(emb) + 1e-9)
 
 
-@dataclass
+@dataclass(eq=False)  # identity semantics: centroids are arrays
 class _Speaker:
     label: str
     centroid: np.ndarray
     count: int = 1
     enrolled: bool = False
+    seconds: float = 0.0  # speech seen, used to weight the centroid
 
 
 @dataclass
@@ -125,58 +153,205 @@ class SpeakerMatch:
     label: str
     score: float
     is_new: bool = False
+    confident: bool = True  # False: below threshold, label is a best guess
+
+
+@dataclass
+class SpeakerTurn:
+    """A single-speaker stretch of an utterance (times relative to the utterance start)."""
+
+    start: float
+    end: float
+    match: SpeakerMatch
 
 
 @dataclass
 class SpeakerClassifier:
-    """Online nearest-centroid speaker classifier.
+    """Online speaker classifier: nearest centroid with change detection and self-correction.
 
-    Each utterance embedding is compared (cosine) to every known speaker. Above `threshold`
-    it is assigned to the best match and that centroid is refined; below it, a new
-    "Speaker N" is created (up to `max_speakers`). Short utterances never create speakers,
-    since their embeddings are unreliable.
+    - `segment()` slides a window over an utterance and splits it where adjacent windows
+      stop sounding like the same voice, so fast hand-overs without a pause are caught.
+    - Each turn is compared (cosine) to every known speaker, with a small bonus for whoever
+      spoke last. Above `threshold` it is assigned and that centroid refined (weighted by
+      duration); below it, a new "Speaker N" is created (up to `max_speakers`). Short turns
+      never create speakers, since their embeddings are unreliable.
+    - Discovered speakers whose centroids converge above `merge_threshold` are merged;
+      `resolve()` maps a stale label to the speaker it was folded into.
+    - `peek()` scores audio without learning from it, for provisional live labels.
     """
 
     embedder: SpeakerEmbedder
-    threshold: float = 0.5
+    threshold: float = 0.35
     max_speakers: int = 0  # <= 0: unlimited
     min_new_speaker_seconds: float = 1.5
-    max_centroid_weight: int = 50  # caps history so centroids keep adapting
+    max_centroid_seconds: float = 120.0  # caps history so centroids keep adapting
+    continuity_bonus: float = 0.05
+    merge_threshold: float = 0.6
+    change_window: float = 1.0
+    change_hop: float = 0.25
+    change_threshold: float = 0.3
+    min_turn_seconds: float = 1.0
     speakers: list[_Speaker] = field(default_factory=list)
+    aliases: dict[str, str] = field(default_factory=dict)
+    _last: Optional[_Speaker] = field(default=None, repr=False)
+    _next_id: int = field(default=0, repr=False)
 
     def enroll(self, label: str, samples: np.ndarray) -> None:
         """Register a known person from a clean voice sample (a few seconds is enough)."""
         emb = self.embedder.embed(samples)
+        duration = len(samples) / self.embedder.sample_rate
         existing = next((s for s in self.speakers if s.label == label), None)
         if existing:
-            self._update(existing, emb)
+            self._update(existing, emb, duration)
         else:
-            self.speakers.append(_Speaker(label, emb, enrolled=True))
+            self.speakers.append(_Speaker(label, emb, enrolled=True, seconds=duration))
+
+    def resolve(self, label: str) -> str:
+        """Current label of a speaker, following merges."""
+        while label in self.aliases:
+            label = self.aliases[label]
+        return label
 
     def classify(self, samples: np.ndarray) -> SpeakerMatch:
-        emb = self.embedder.embed(samples)
-        duration = len(samples) / self.embedder.sample_rate
+        """Label one single-speaker stretch of audio and learn from it."""
+        return self._classify(self.embedder.embed(samples), len(samples) / self.embedder.sample_rate)
 
-        best, score = None, -1.0
-        if self.speakers:
-            scores = np.stack([s.centroid for s in self.speakers]) @ emb
-            idx = int(np.argmax(scores))
-            best, score = self.speakers[idx], float(scores[idx])
+    def peek(self, samples: np.ndarray) -> SpeakerMatch:
+        """Best guess for `samples` without changing any state; "?" for an unknown voice."""
+        best, score, _ = self._best(self.embedder.embed(samples))
+        if best is None or score < self.threshold:
+            return SpeakerMatch("?", max(score, 0.0), is_new=True, confident=False)
+        return SpeakerMatch(best.label, score)
 
+    def segment(self, samples: np.ndarray) -> list[SpeakerTurn]:
+        """Split an utterance at speaker changes and classify each turn."""
+        sr = self.embedder.sample_rate
+        cuts = self._change_points(samples)
+        bounds = [0, *cuts, len(samples)]
+        turns: list[SpeakerTurn] = []
+        for a, b in zip(bounds, bounds[1:]):
+            match = self.classify(samples[a:b])
+            if turns and self.resolve(turns[-1].match.label) == match.label:
+                turns[-1].end = b / sr
+                turns[-1].match.label = match.label
+            else:
+                turns.append(SpeakerTurn(a / sr, b / sr, match))
+        for turn in turns:
+            turn.match.label = self.resolve(turn.match.label)
+        return turns
+
+    def _change_points(self, samples: np.ndarray) -> list[int]:
+        """Sample offsets where the voice changes, at least `min_turn_seconds` apart."""
+        sr = self.embedder.sample_rate
+        win, hop = int(self.change_window * sr), int(self.change_hop * sr)
+        min_turn = int(self.min_turn_seconds * sr)
+        if len(samples) < 2 * max(win, min_turn):
+            return []
+        starts = range(0, len(samples) - win + 1, hop)
+        embs = np.stack([self.embedder.embed(samples[s : s + win]) for s in starts])
+        step = win // hop  # windows i and i+step touch without overlapping
+        if len(embs) <= step:
+            return []
+        sims = np.einsum("ij,ij->i", embs[:-step], embs[step:])
+        boundary = [(i + step) * hop for i in range(len(sims))]
+
+        cuts: list[int] = []
+        for i in np.argsort(sims):
+            if sims[i] >= self.change_threshold:
+                break
+            b = boundary[i]
+            if min(b, len(samples) - b) >= min_turn and all(abs(b - c) >= min_turn for c in cuts):
+                cuts.append(b)
+        cuts.sort()
+
+        # Confirm on whole turns, which embed far more reliably than single windows
+        while cuts:
+            bounds = [0, *cuts, len(samples)]
+            pieces = [self.embedder.embed(samples[a:b]) for a, b in zip(bounds, bounds[1:])]
+            sims = [float(x @ y) for x, y in zip(pieces, pieces[1:])]
+            i = int(np.argmax(sims))
+            if sims[i] < self.threshold:
+                break
+            del cuts[i]
+        return cuts
+
+    def _best(self, emb: np.ndarray) -> tuple[Optional[_Speaker], float, float]:
+        """(best speaker, raw cosine, cosine incl. continuity bonus)."""
+        if not self.speakers:
+            return None, -1.0, -1.0
+        raw = np.stack([s.centroid for s in self.speakers]) @ emb
+        biased = raw + np.array([self.continuity_bonus if s is self._last else 0.0 for s in self.speakers])
+        idx = int(np.argmax(biased))
+        return self.speakers[idx], float(raw[idx]), float(biased[idx])
+
+    def _classify(self, emb: np.ndarray, duration: float) -> SpeakerMatch:
+        best, score, biased = self._best(emb)
         can_create = duration >= self.min_new_speaker_seconds and (
             self.max_speakers <= 0 or len(self.speakers) < self.max_speakers
         )
-        if best is None or (score < self.threshold and can_create):
-            speaker = _Speaker(f"Speaker {sum(not s.enrolled for s in self.speakers)}", emb)
+        if best is None or (biased < self.threshold and can_create):
+            speaker = _Speaker(f"Speaker {self._next_id}", emb, seconds=duration)
+            self._next_id += 1
             self.speakers.append(speaker)
+            self._last = speaker
+            logger.debug("New %s (best score %.2f)", speaker.label, score)
             return SpeakerMatch(speaker.label, 1.0, is_new=True)
 
-        if score >= self.threshold:
-            self._update(best, emb)
-        return SpeakerMatch(best.label, score)
+        confident = biased >= self.threshold
+        if confident:
+            self._update(best, emb, duration)
+            best = self._merge_duplicates(best)
+        self._last = best
+        return SpeakerMatch(best.label, score, confident=confident)
 
-    def _update(self, speaker: _Speaker, emb: np.ndarray) -> None:
-        w = min(speaker.count, self.max_centroid_weight)
-        centroid = speaker.centroid * w + emb
+    def _update(self, speaker: _Speaker, emb: np.ndarray, duration: float) -> None:
+        w = min(speaker.seconds, self.max_centroid_seconds)
+        centroid = speaker.centroid * w + emb * duration
         speaker.centroid = centroid / (np.linalg.norm(centroid) + 1e-9)
+        speaker.seconds += duration
         speaker.count += 1
+
+    def _merge_duplicates(self, speaker: _Speaker) -> _Speaker:
+        """Fold discovered speakers that turned out to be `speaker` (or vice versa) together."""
+        for other in list(self.speakers):
+            if other is speaker or other not in self.speakers or (other.enrolled and speaker.enrolled):
+                continue
+            if float(other.centroid @ speaker.centroid) < self.merge_threshold:
+                continue
+            keep, gone = (other, speaker) if other.enrolled or (
+                not speaker.enrolled and self.speakers.index(other) < self.speakers.index(speaker)
+            ) else (speaker, other)
+            centroid = keep.centroid * keep.seconds + gone.centroid * gone.seconds
+            keep.centroid = centroid / (np.linalg.norm(centroid) + 1e-9)
+            keep.seconds += gone.seconds
+            keep.count += gone.count
+            self.speakers.remove(gone)
+            self.aliases[gone.label] = keep.label
+            logger.debug("Merged %s into %s", gone.label, keep.label)
+            speaker = keep
+        return speaker
+
+
+@dataclass
+class LiveSpeakerPreview:
+    """Provisional "who is talking now" while an utterance is still in progress.
+
+    Call `update()` after each `VadSegmenter.accept()`; it returns a match at most every
+    `interval` seconds of speech, scored on the last `window` seconds.
+    """
+
+    classifier: SpeakerClassifier
+    vad: VadSegmenter
+    interval: float = 0.5
+    window: float = 2.0
+    min_speech: float = 1.0
+    _last_at: float = field(default=0.0, repr=False)
+
+    def update(self) -> Optional[SpeakerMatch]:
+        live = self.vad.live_seconds
+        if live < self._last_at:  # a new utterance started
+            self._last_at = 0.0
+        if live < self.min_speech or live - self._last_at < self.interval:
+            return None
+        self._last_at = live
+        return self.classifier.peek(self.vad.live_audio(self.window))

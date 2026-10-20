@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import logging
 import time
 from threading import Thread
@@ -143,10 +144,15 @@ class NemotronASR(BaseASREngine):
 
         streamer = TextIteratorStreamer(p.tokenizer, skip_special_tokens=skip_special_tokens)
 
+        # generate() keeps per-call streaming state on the model object itself, so concurrent
+        # streams (e.g. mic + system audio in mixed mode) each get a shallow copy: own
+        # attributes, shared weights and submodules (which hold no per-call state).
+        model = copy.copy(self.model)
+
         def generate() -> None:
             try:
                 with torch.inference_mode():
-                    self.model.generate(
+                    model.generate(
                         **{**first_inputs, "input_features": features()}, streamer=streamer, max_new_tokens=1_000_000
                     )
             except Exception:

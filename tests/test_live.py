@@ -3,7 +3,7 @@
 import numpy as np
 from transformers.audio_utils import load_audio
 
-from spek.speakers import SpeakerClassifier, SpeakerEmbedder, VadSegmenter
+from spek.speakers import LiveSpeakerPreview, SpeakerClassifier, SpeakerEmbedder, VadSegmenter
 from spek.streamer import AudioBuffer
 
 
@@ -64,3 +64,71 @@ def test_vad_and_embeddings_separate_two_real_speakers():
     second = {lbl for start, lbl in labels if start > 31}
     assert len(labels) >= 3
     assert first and second and first.isdisjoint(second)
+
+
+def _two_voices(gap: float):
+    sr = 16000
+    obama = load_audio("samples/obama.mp3", sampling_rate=sr)[5 * sr : 11 * sr]
+    other = load_audio("samples/sample1.flac", sampling_rate=sr)[: 6 * sr]
+    obama, other = (0.5 * x / np.abs(x).max() for x in (obama, other))
+    return np.concatenate([obama, np.zeros(int(gap * sr)), other]).astype(np.float32), sr
+
+
+def test_classifier_merges_duplicate_speakers_and_resolves_labels():
+    clf = SpeakerClassifier(_FakeEmbedder(), threshold=0.9, merge_threshold=0.85)
+    pad = np.zeros(32000)
+    clf.classify(np.r_[1, 0, 0, 0, pad].astype(np.float32))
+    clf.classify(np.r_[1, 0.8, 0, 0, pad].astype(np.float32))  # cos 0.78: becomes "Speaker 1"
+    assert len(clf.speakers) == 2
+    # A voice in between pulls Speaker 1 towards Speaker 0, and they are folded together
+    assert clf.classify(np.r_[1, 0.4, 0, 0, pad].astype(np.float32)).label == "Speaker 0"
+    assert [s.label for s in clf.speakers] == ["Speaker 0"]
+    assert clf.resolve("Speaker 1") == "Speaker 0"
+    # Numbering never reuses a merged label
+    assert clf.classify(np.r_[0, 0, 0, 1, pad].astype(np.float32)).label == "Speaker 2"
+
+
+def test_classifier_peek_does_not_learn():
+    clf = SpeakerClassifier(_FakeEmbedder(), threshold=0.9)
+    a = np.r_[1, 0, 0, 0, np.zeros(32000)].astype(np.float32)
+    assert clf.peek(a).label == "?"
+    assert not clf.speakers
+    clf.classify(a)
+    before = clf.speakers[0].centroid.copy()
+    assert clf.peek(a).label == "Speaker 0"
+    np.testing.assert_array_equal(clf.speakers[0].centroid, before)
+
+
+def test_segment_splits_handover_without_pause():
+    """Two voices 0.1 s apart form one VAD utterance; segment() must still split them."""
+    audio, sr = _two_voices(gap=0.1)
+    clf = SpeakerClassifier(SpeakerEmbedder())
+    turns = clf.segment(audio)
+    assert len(turns) == 2
+    assert turns[0].match.label != turns[1].match.label
+    assert abs(turns[0].end - 6.0) < 0.75
+
+
+def test_segment_keeps_single_speaker_whole():
+    sr = 16000
+    obama = load_audio("samples/obama.mp3", sampling_rate=sr)[5 * sr : 17 * sr].astype(np.float32)
+    turns = SpeakerClassifier(SpeakerEmbedder()).segment(obama)
+    assert len(turns) == 1 and turns[0].end == len(obama) / sr
+
+
+def test_live_preview_labels_speech_in_progress():
+    audio, sr = _two_voices(gap=1.0)
+    vad = VadSegmenter(sr)
+    clf = SpeakerClassifier(SpeakerEmbedder())
+    preview = LiveSpeakerPreview(clf, vad)
+    live = []
+    for i in range(0, len(audio), 1600):
+        for utt in vad.accept(audio[i : i + 1600]):
+            clf.segment(utt.samples)
+        if match := preview.update():
+            live.append((i / sr, match.label))
+    assert vad.live_seconds > 0 and len(vad.live_audio(2.0)) <= 2 * sr + 512
+    # Unknown before its first utterance ends, then recognised live; the second voice is new
+    assert live and all(lbl == "?" for t, lbl in live if t < 3.0)
+    assert {lbl for t, lbl in live if 4.5 < t < 6.0} == {"Speaker 0"}
+    assert {lbl for t, lbl in live if t > 8.0} == {"?"}

@@ -20,6 +20,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
 
 from spek.base import BaseASREngine
+from spek.engines.sherpa import SherpaOnnxASR
 from spek.factory import get_engine as create_engine, list_available_models
 from spek.streamer import BaseAudioStreamSession
 
@@ -149,23 +150,31 @@ async def transcribe_file(
 
 @app.websocket("/ws/stream")
 async def websocket_stream(websocket: WebSocket):
-    """Live streaming: first a JSON config message, then float32 16 kHz PCM frames, then {"type": "eof"}."""
+    """Live streaming: first a JSON config message, then float32 16 kHz PCM frames, then {"type": "eof"}.
+
+    Server messages: {"type": "token"}, {"type": "speaker"} (sherpa-onnx: provisional while
+    someone talks, final per turn) and finally {"type": "done"}.
+    """
     await websocket.accept()
     engine = get_engine()
     loop = asyncio.get_running_loop()
     session: Optional[BaseAudioStreamSession] = None
 
-    def on_token(token: str) -> None:
-        asyncio.run_coroutine_threadsafe(websocket.send_json({"type": "token", "text": token}), loop)
+    def send(payload: dict[str, Any]) -> None:
+        asyncio.run_coroutine_threadsafe(websocket.send_json(payload), loop)
 
     try:
         config = json.loads(await websocket.receive_text())
+        extra: dict[str, Any] = {}
+        if isinstance(engine, SherpaOnnxASR):  # live "who is speaking" events
+            extra["on_speaker"] = lambda event: send({"type": "speaker", **event})
         session = await run_in_threadpool(
             engine.create_stream_session,
             language=config.get("language", "auto"),
             lookahead=int(config.get("lookahead", 6)),
             skip_special_tokens=bool(config.get("skip_special_tokens", True)),
-            on_token=on_token,
+            on_token=lambda token: send({"type": "token", "text": token}),
+            **extra,
         )
         session.start()
 

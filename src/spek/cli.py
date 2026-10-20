@@ -9,6 +9,7 @@ import time
 from typing import Any, Optional
 
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
@@ -223,7 +224,7 @@ def handle_mic(args):
     finally:
         session.finish()
         session.join(timeout=30)
-    console.print(Panel(session.transcript or "[dim](no speech)[/dim]", title="Final Transcript", border_style="green"))
+    console.print(Panel(escape(session.transcript) or "[dim](no speech)[/dim]", title="Final Transcript", border_style="green"))
 
 
 def handle_listen(args):
@@ -299,6 +300,65 @@ def handle_listen(args):
         worker.join(timeout=60)
 
 
+def handle_mixed(args):
+    """Microphone + system audio as two channels in one transcript: you vs. remote speakers."""
+    import threading
+    from pathlib import Path
+
+    from spek import system_audio as sa
+    from spek.mixed import EchoGate, MixedSession
+
+    try:
+        sa.check_available()
+    except sa.SystemAudioError as err:
+        raise SystemExit(f"System audio unavailable: {err}")
+
+    engine = load_engine(args)
+    speaker_opts = live_session_kwargs(engine, args)
+    for key in ("tag_speakers", "tag_format"):  # tagging is done by the mixer, for every engine
+        speaker_opts.pop(key, None)
+    session = MixedSession(
+        engine,
+        me_label=args.me,
+        remote_label=args.remote,
+        classify=args.classify,
+        tag_speakers=args.tag_speakers is not False,
+        tag_format=args.tag_format or "block",
+        echo_gate=EchoGate(engine.sampling_rate) if args.echo_guard else None,
+        on_token=lambda t: (sys.stdout.write(t), sys.stdout.flush()),
+        speaker_kwargs=speaker_opts,
+        language=args.language,
+        lookahead=args.lookahead,
+        skip_special_tokens=not args.keep_tag,
+    ).start()
+    capture = sa.DualCapture(session.push_mic, session.push_system, mic_device=args.mic_source,
+                             system_device=args.system_source, sample_rate=engine.sampling_rate)
+
+    remote = "classified by voice" if session.classify else f"tagged [{args.remote}]"
+    console.print(f"[bold]Mic:[/bold] [cyan]{args.mic_source}[/cyan] → [{args.me}]  "
+                  f"[bold]System:[/bold] [cyan]{args.system_source}[/cyan] → {remote}  "
+                  f"[bold]Echo guard:[/bold] {'on' if args.echo_guard else 'off'}")
+    console.print("[bold green]Listening... press Ctrl+C to stop.[/bold green]\n")
+    capture.start()
+    try:
+        threading.Event().wait()
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Stopping capture...[/yellow]")
+    finally:
+        capture.stop()
+        session.finish()
+        session.join(timeout=60)
+
+    console.print()
+    if session.echo_gate and session.echo_gate.muted_seconds:
+        console.print(f"[dim]Echo guard muted {session.echo_gate.muted_seconds:.0f}s of mic audio.[/dim]")
+    console.print(Panel(escape(session.transcript) or "[dim](no speech)[/dim]", title="Final Transcript", border_style="green"))
+    if args.save:
+        path = Path(args.save).expanduser()
+        path.write_text(session.transcript + "\n", encoding="utf-8")
+        console.print(f"[dim]Saved transcript to {path}[/dim]")
+
+
 def print_audio_streams(sa) -> None:
     detector = sa.ActivityDetector()
     playback, recording = sa.playback_streams(), sa.recording_streams()
@@ -325,10 +385,10 @@ def print_audio_streams(sa) -> None:
 
 
 def handle_speakers(args):
-    """Live speaker classification only (no ASR): who is speaking, utterance by utterance."""
+    """Live speaker classification only (no ASR): who is speaking, turn by turn."""
     from transformers.audio_utils import load_audio
 
-    from spek.speakers import SpeakerClassifier, SpeakerEmbedder, VadSegmenter
+    from spek.speakers import LiveSpeakerPreview, SpeakerClassifier, SpeakerEmbedder, VadSegmenter
 
     sr = 16000
     with console.status("[bold green]Loading VAD and speaker-embedding models..."):
@@ -340,16 +400,21 @@ def handle_speakers(args):
             classifier.enroll(name, load_audio(path, sampling_rate=sr))
     if classifier.speakers:
         console.print(f"[bold]Enrolled:[/bold] {', '.join(s.label for s in classifier.speakers)}")
+    preview = LiveSpeakerPreview(classifier, vad)
 
-    def report(utts) -> None:
+    def report(utts, status=None) -> None:
         for utt in utts:
-            match = classifier.classify(utt.samples)
-            end = utt.start + len(utt.samples) / sr
-            tag = " [green](new)[/green]" if match.is_new else ""
-            console.print(
-                f"[dim]{utt.start:7.2f}s – {end:7.2f}s[/dim]  [bold magenta]{match.label}[/bold magenta]"
-                f"  [dim]sim={match.score:.2f}[/dim]{tag}"
-            )
+            for turn in classifier.segment(utt.samples):
+                match = turn.match
+                tag = " [green](new)[/green]" if match.is_new else "" if match.confident else " [yellow](?)[/yellow]"
+                console.print(
+                    f"[dim]{utt.start + turn.start:7.2f}s – {utt.start + turn.end:7.2f}s[/dim]  "
+                    f"[bold magenta]{match.label}[/bold magenta]  [dim]sim={match.score:.2f}[/dim]{tag}"
+                )
+        if status and (live := preview.update()):
+            who = "new voice" if live.label == "?" else live.label
+            status.update(f"[bold green]Listening...[/bold green] speaking now: [magenta]{who}[/magenta] "
+                          f"[dim]({live.score:.2f})[/dim]")
 
     if args.audio:
         wav = load_audio(args.audio, sampling_rate=sr).astype("float32")
@@ -361,17 +426,18 @@ def handle_speakers(args):
         import sounddevice as sd
 
         frames: queue.Queue = queue.Queue()
-        console.print("[bold green]Listening... press Ctrl+C to stop.[/bold green]\n")
-        with sd.InputStream(samplerate=sr, channels=1, dtype="float32", blocksize=sr // 10,
-                            callback=lambda indata, *_: frames.put(indata[:, 0].copy())):
+        with console.status("[bold green]Listening... press Ctrl+C to stop.[/bold green]") as status, \
+                sd.InputStream(samplerate=sr, channels=1, dtype="float32", blocksize=sr // 10,
+                               callback=lambda indata, *_: frames.put(indata[:, 0].copy())):
             try:
                 while True:
-                    report(vad.accept(frames.get()))
+                    report(vad.accept(frames.get()), status)
             except KeyboardInterrupt:
                 report(vad.flush())
 
+    merged = f"; merged {', '.join(f'{a}→{b}' for a, b in classifier.aliases.items())}" if classifier.aliases else ""
     console.print(f"\n[bold]Speakers seen:[/bold] {len(classifier.speakers)} "
-                  f"({', '.join(f'{s.label}×{s.count}' for s in classifier.speakers)})")
+                  f"({', '.join(f'{s.label}×{s.count}' for s in classifier.speakers)}){merged}")
 
 
 def handle_serve(args):
@@ -446,6 +512,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--source", default=None, help="Record this capture source continuously instead of auto-detecting")
     p.add_argument("--save-dir", default=None, help="Write each recording's transcript to this directory")
     p.add_argument("--list", action="store_true", help="Show playback streams and capture sources, then exit")
+
+    p = add("mixed", handle_mixed, "Mic + system audio as separate channels: you vs. remote speakers (Linux)",
+            [engine_opts, asr_opts, lookahead_opts, speaker_opts, live_speaker_opts])
+    p.add_argument("--classify", action=argparse.BooleanOptionalAction, default=True,
+                   help="Tell remote speakers apart by voice (sherpa-onnx; default: on)")
+    p.add_argument("--me", default="You", help="Label for the microphone channel (default: %(default)s)")
+    p.add_argument("--remote", default="Remote", help="Label for system audio without --classify (default: %(default)s)")
+    p.add_argument("--mic-source", default="@DEFAULT_SOURCE@", help="Microphone source (see `spek listen --list`)")
+    p.add_argument("--system-source", default="@DEFAULT_MONITOR@", help="System audio source (a sink monitor)")
+    p.add_argument("--echo-guard", action=argparse.BooleanOptionalAction, default=True,
+                   help="Mute mic audio that is just the speakers' echo (default: on; off with headphones)")
+    p.add_argument("--save", default=None, metavar="PATH", help="Write the final transcript to this file")
 
     p = add("speakers", handle_speakers, "Live speaker classification from mic (or a file)",
             [live_speaker_opts])

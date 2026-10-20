@@ -174,3 +174,30 @@ def test_server_with_sherpa_engine():
     res_ui = client.get("/")
     assert res_ui.status_code == 200
     assert "Sherpa-ONNX" in res_ui.text
+
+
+def test_sherpa_live_session_splits_turns_and_reports_speakers():
+    """A hand-over without a pause yields two tagged turns plus live speaker events."""
+    from transformers.audio_utils import load_audio
+
+    sr = 16000
+    obama = load_audio("samples/obama.mp3", sampling_rate=sr)[5 * sr : 11 * sr]
+    other = load_audio("samples/sample1.flac", sampling_rate=sr)[: 6 * sr]
+    obama, other = (0.5 * x / np.abs(x).max() for x in (obama, other))
+    audio = np.concatenate([obama, np.zeros(sr // 10), other]).astype(np.float32)
+
+    engine = SherpaOnnxASR(model_id="sherpa-onnx")
+    engine._is_loaded = True
+    engine._transcribe_batch = MagicMock(side_effect=lambda chunks: [f"words{len(c) // sr}" for c in chunks])
+    events = []
+    session = engine.create_stream_session(on_speaker=events.append).start()
+    for i in range(0, len(audio), sr // 10):
+        session.push_audio(audio[i : i + sr // 10])
+    session.finish()
+    assert session.join(timeout=60)
+
+    speakers = [s["speaker"] for s in session.segments]
+    assert len(set(speakers)) == 2
+    assert session.transcript.count("[Speaker") >= 2
+    assert any(e["provisional"] for e in events)
+    assert [e["label"] for e in events if not e["provisional"]] == speakers
