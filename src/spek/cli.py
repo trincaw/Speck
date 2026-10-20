@@ -41,12 +41,6 @@ def preset_label(engine: BaseASREngine, lookahead: int) -> str:
     return f"{cfg.get('description', '')} ({cfg.get('latency_ms', 0)}ms)"
 
 
-def speaker_kwargs(args: argparse.Namespace) -> dict[str, Any]:
-    """Speaker-tagging options set on the command line (only those given)."""
-    kwargs = {"tag_speakers": args.tag_speakers, "tag_format": args.tag_format, "num_clusters": args.num_speakers}
-    return {k: v for k, v in kwargs.items() if v is not None}
-
-
 def parse_enroll(values: list[str]) -> dict[str, str]:
     enroll = {}
     for value in values or []:
@@ -114,9 +108,7 @@ def handle_transcribe(args):
     console.print(f"[bold]Audio:[/bold] [cyan]{args.audio}[/cyan]  [bold]Language:[/bold] [yellow]{args.language}[/yellow]")
 
     with console.status(f"[bold green]Transcribing with {engine.name}..."):
-        result = engine.transcribe(
-            args.audio, language=args.language, skip_special_tokens=not args.keep_tag, **speaker_kwargs(args)
-        )
+        result = engine.transcribe(args.audio, language=args.language, skip_special_tokens=not args.keep_tag)
 
     table = Table(title="Transcription Metrics", border_style="cyan")
     table.add_column("Metric", style="bold")
@@ -187,27 +179,9 @@ def handle_benchmark(args):
     console.print(table)
 
 
-def live_session_kwargs(engine: BaseASREngine, args: argparse.Namespace) -> dict[str, Any]:
-    """Live speaker-classification options for the session (sherpa-onnx only)."""
-    from spek.engines.sherpa import SherpaOnnxASR
-
-    if isinstance(engine, SherpaOnnxASR):
-        return {
-            "tag_speakers": args.tag_speakers,
-            "tag_format": args.tag_format,
-            "speaker_threshold": args.speaker_threshold,
-            "max_speakers": args.num_speakers,
-            "enroll": parse_enroll(args.enroll),
-        }
-    if args.enroll or args.num_speakers:
-        console.print("[yellow]Speaker options are only supported with --model sherpa-onnx; ignoring.[/yellow]")
-    return {}
-
-
 def handle_mic(args):
-    """Live microphone transcription; with sherpa-onnx, each utterance is speaker-tagged."""
+    """Live microphone transcription."""
     engine = load_engine(args)
-    session_kwargs = live_session_kwargs(engine, args)
 
     console.print(f"[bold]Language:[/bold] [yellow]{args.language}[/yellow]  [bold]Preset:[/bold] [magenta]{preset_label(engine, args.lookahead)}[/magenta]")
     console.print("[bold green]Listening... press Ctrl+C to stop.[/bold green]\n")
@@ -217,7 +191,6 @@ def handle_mic(args):
         lookahead=args.lookahead,
         skip_special_tokens=not args.keep_tag,
         on_token=lambda t: (sys.stdout.write(t), sys.stdout.flush()),
-        **session_kwargs,
     ).start()
     try:
         stream_microphone(session, engine.sampling_rate)
@@ -243,7 +216,6 @@ def handle_listen(args):
         raise SystemExit(f"System audio unavailable: {err}")
 
     engine = load_engine(args)
-    session_kwargs = live_session_kwargs(engine, args)
     save_dir = Path(args.save_dir).expanduser() if args.save_dir else None
     if save_dir:
         save_dir.mkdir(parents=True, exist_ok=True)
@@ -254,7 +226,6 @@ def handle_listen(args):
             lookahead=args.lookahead,
             skip_special_tokens=not args.keep_tag,
             on_token=lambda t: (sys.stdout.write(t), sys.stdout.flush()),
-            **session_kwargs,
         )
 
     def on_start(rec: sa.Recording) -> None:
@@ -314,19 +285,14 @@ def handle_mixed(args):
         raise SystemExit(f"System audio unavailable: {err}")
 
     engine = load_engine(args)
-    speaker_opts = live_session_kwargs(engine, args)
-    for key in ("tag_speakers", "tag_format"):  # tagging is done by the mixer, for every engine
-        speaker_opts.pop(key, None)
     session = MixedSession(
         engine,
         me_label=args.me,
         remote_label=args.remote,
-        classify=args.classify,
         tag_speakers=args.tag_speakers is not False,
         tag_format=args.tag_format or "block",
         echo_gate=EchoGate(engine.sampling_rate) if args.echo_guard else None,
         on_token=lambda t: (sys.stdout.write(t), sys.stdout.flush()),
-        speaker_kwargs=speaker_opts,
         language=args.language,
         lookahead=args.lookahead,
         skip_special_tokens=not args.keep_tag,
@@ -334,9 +300,8 @@ def handle_mixed(args):
     capture = sa.DualCapture(session.push_mic, session.push_system, mic_device=args.mic_source,
                              system_device=args.system_source, sample_rate=engine.sampling_rate)
 
-    remote = "classified by voice" if session.classify else f"tagged [{args.remote}]"
     console.print(f"[bold]Mic:[/bold] [cyan]{args.mic_source}[/cyan] → [{args.me}]  "
-                  f"[bold]System:[/bold] [cyan]{args.system_source}[/cyan] → {remote}  "
+                  f"[bold]System:[/bold] [cyan]{args.system_source}[/cyan] → [{args.remote}]  "
                   f"[bold]Echo guard:[/bold] {'on' if args.echo_guard else 'off'}")
     console.print("[bold green]Listening... press Ctrl+C to stop.[/bold green]\n")
     capture.start()
@@ -470,9 +435,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     speaker_opts = argparse.ArgumentParser(add_help=False)
     speaker_opts.add_argument("--tag-speakers", action=argparse.BooleanOptionalAction, default=None,
-                              help="Prefix speaker tags in output (sherpa-onnx)")
+                              help="Prefix channel tags in output")
     speaker_opts.add_argument("--tag-format", choices=["block", "inline"], default=None)
-    speaker_opts.add_argument("--num-speakers", type=int, default=None, help="Fixed/max speaker count (omit to auto-detect)")
 
     live_speaker_opts = argparse.ArgumentParser(add_help=False)
     live_speaker_opts.add_argument("--enroll", action="append", metavar="NAME=WAV",
@@ -491,18 +455,17 @@ def build_parser() -> argparse.ArgumentParser:
     add("models", handle_models, "List engines and .env status", [])
     add("languages", handle_languages, "List supported languages", [engine_opts])
 
-    p = add("transcribe", handle_transcribe, "Offline transcription", [engine_opts, asr_opts, speaker_opts])
+    p = add("transcribe", handle_transcribe, "Offline transcription", [engine_opts, asr_opts])
     p.add_argument("audio", help="Audio file (.wav, .mp3, .flac)")
 
     p = add("stream", handle_stream, "Chunked streaming transcription of a file", [engine_opts, asr_opts, lookahead_opts])
     p.add_argument("audio")
     p.add_argument("--simulate-realtime", action="store_true", help="Pace input like live audio")
 
-    add("mic", handle_mic, "Live microphone transcription (speaker-tagged with sherpa-onnx)",
-        [engine_opts, asr_opts, lookahead_opts, speaker_opts, live_speaker_opts])
+    add("mic", handle_mic, "Live microphone transcription", [engine_opts, asr_opts, lookahead_opts])
 
     p = add("listen", handle_listen, "Auto-transcribe system audio (calls, videos) on Linux",
-            [engine_opts, asr_opts, lookahead_opts, speaker_opts, live_speaker_opts])
+            [engine_opts, asr_opts, lookahead_opts])
     p.add_argument("--app", action="append", metavar="NAME",
                    help="Only react to these apps (substring of name/binary, e.g. discord, firefox); repeatable")
     p.add_argument("--mic", choices=["auto", "on", "off"], default="auto",
@@ -514,11 +477,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--list", action="store_true", help="Show playback streams and capture sources, then exit")
 
     p = add("mixed", handle_mixed, "Mic + system audio as separate channels: you vs. remote speakers (Linux)",
-            [engine_opts, asr_opts, lookahead_opts, speaker_opts, live_speaker_opts])
-    p.add_argument("--classify", action=argparse.BooleanOptionalAction, default=True,
-                   help="Tell remote speakers apart by voice (sherpa-onnx; default: on)")
+            [engine_opts, asr_opts, lookahead_opts, speaker_opts])
     p.add_argument("--me", default="You", help="Label for the microphone channel (default: %(default)s)")
-    p.add_argument("--remote", default="Remote", help="Label for system audio without --classify (default: %(default)s)")
+    p.add_argument("--remote", default="Remote", help="Label for the system audio channel (default: %(default)s)")
     p.add_argument("--mic-source", default="@DEFAULT_SOURCE@", help="Microphone source (see `spek listen --list`)")
     p.add_argument("--system-source", default="@DEFAULT_MONITOR@", help="System audio source (a sink monitor)")
     p.add_argument("--echo-guard", action=argparse.BooleanOptionalAction, default=True,

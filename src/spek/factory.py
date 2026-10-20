@@ -11,7 +11,6 @@ import torch
 from spek.base import BaseASREngine
 from spek.config import get_device, get_dtype_str, get_model_name
 from spek.engines.nemotron import NemotronASR
-from spek.engines.sherpa import SherpaOnnxASR
 from spek.engines.voxtral import VoxtralASR
 
 logger = logging.getLogger(__name__)
@@ -56,16 +55,6 @@ ENGINE_SPECS: list[EngineSpec] = [
         description="State-of-the-art multilingual ASR with speaker diarization, timestamps, and low WER.",
         passthrough_ids=("voxtral-mini-latest", "voxtral-mini-transcribe-2"),
     ),
-    EngineSpec(
-        id="sherpa-onnx",
-        cls=SherpaOnnxASR,
-        default_model_id="sherpa-onnx",
-        aliases=("sherpa", "sherpa-onnx", "sherpa_onnx", "sherpa-asr", "sherpa-onnx-asr"),
-        name="Sherpa-ONNX Speech Tagging & Diarization",
-        architecture="Pyannote Diarization + 3D-Speaker + Whisper ONNX",
-        type="local_onnx",
-        description="Auto-detects speakers (offline and live mic), tags speech per speaker via ONNX.",
-    ),
 ]
 
 _SPEC_BY_ALIAS: dict[str, EngineSpec] = {alias: spec for spec in ENGINE_SPECS for alias in spec.aliases}
@@ -74,7 +63,7 @@ _SPEC_BY_ALIAS: dict[str, EngineSpec] = {alias: spec for spec in ENGINE_SPECS fo
 _ENGINE_REGISTRY: dict[str, type[BaseASREngine]] = {alias: spec.cls for alias, spec in _SPEC_BY_ALIAS.items()}
 
 # Substring heuristics for unregistered model strings (e.g. new HF checkpoints)
-_KEYWORDS = (("sherpa", ENGINE_SPECS[2]), ("voxtral", ENGINE_SPECS[1]), ("mistral", ENGINE_SPECS[1]),
+_KEYWORDS = (("voxtral", ENGINE_SPECS[1]), ("mistral", ENGINE_SPECS[1]),
              ("nemotron", ENGINE_SPECS[0]), ("fastconformer", ENGINE_SPECS[0]))
 
 _DTYPES = {
@@ -109,7 +98,7 @@ def get_engine(
     """Instantiate an ASR engine by name/alias, defaulting to SPEK_MODEL from .env.
 
     Args:
-        model: Alias or checkpoint (e.g. 'nemotron', 'voxtral', 'sherpa-onnx', 'nvidia/...').
+        model: Alias or checkpoint (e.g. 'nemotron', 'voxtral', 'nvidia/...').
         device: 'cuda', 'cpu', or None for auto.
         dtype: torch dtype, or None for SPEK_DTYPE / auto.
         kwargs: Engine-specific constructor arguments.

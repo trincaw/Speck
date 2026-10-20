@@ -1,8 +1,7 @@
 """Mixed mode: microphone and system audio as two channels merged into one transcript.
 
 Keeping the channels apart (instead of summing them) means the device already tells who
-is talking: the microphone is you, system audio is everyone else. On top of that, remote
-participants can be told apart with live speaker classification (sherpa-onnx).
+is talking: the microphone is you, system audio is everyone else.
 
 - `TranscriptMixer` interleaves labelled text from several live sessions.
 - `EchoGate` mutes microphone audio that is only the speakers' sound picked up again
@@ -147,8 +146,7 @@ class MixedSession:
     """Live transcription of the microphone ("you") and system audio ("them") together.
 
     Feed `push_mic()` / `push_system()` from any capture (they may run on different
-    threads). With `classify=True` on a sherpa-onnx engine, remote participants are
-    told apart by voice; otherwise system audio is tagged `remote_label`.
+    threads). System audio is tagged `remote_label`.
     """
 
     def __init__(
@@ -156,44 +154,22 @@ class MixedSession:
         engine,
         me_label: str = "You",
         remote_label: str = "Remote",
-        classify: bool = True,
         tag_speakers: bool = True,
         tag_format: str = "block",
         echo_gate: Optional[EchoGate] = None,
         on_token: Optional[Callable[[str], None]] = None,
-        on_speaker: Optional[Callable[[dict[str, Any]], None]] = None,
-        speaker_kwargs: Optional[dict[str, Any]] = None,
         **session_kwargs: Any,
     ):
-        from spek.engines.sherpa import SherpaOnnxASR
-
-        sherpa = isinstance(engine, SherpaOnnxASR)
-        self.classify = classify and sherpa
-        if classify and not sherpa:
-            logger.info("Speaker classification needs sherpa-onnx; tagging system audio as '%s'.", remote_label)
         self.me_label, self.remote_label = me_label, remote_label
         self.mixer = TranscriptMixer(tag=tag_speakers, tag_format=tag_format, on_token=on_token)
         self.echo_gate = echo_gate
-        self._on_speaker = on_speaker
-        plain = {"classify": False} if sherpa else {}
 
         self.mic = engine.create_stream_session(
-            on_token=lambda t: self.mixer.emit(me_label, t, channel="mic"), **plain, **session_kwargs
+            on_token=lambda t: self.mixer.emit(me_label, t, channel="mic"), **session_kwargs
         )
-        if self.classify:
-            self.system = engine.create_stream_session(
-                on_speaker=self._remote_speaker, **(speaker_kwargs or {}), **session_kwargs
-            )
-        else:
-            self.system = engine.create_stream_session(
-                on_token=lambda t: self.mixer.emit(remote_label, t, channel="system"), **plain, **session_kwargs
-            )
-
-    def _remote_speaker(self, event: dict[str, Any]) -> None:
-        if not event["provisional"]:
-            self.mixer.emit(event["label"], event["text"], whole=True, channel="system")
-        if self._on_speaker:
-            self._on_speaker(event)
+        self.system = engine.create_stream_session(
+            on_token=lambda t: self.mixer.emit(remote_label, t, channel="system"), **session_kwargs
+        )
 
     @property
     def sessions(self) -> tuple:

@@ -204,7 +204,6 @@
 
         <div class="status-bar">
           <div>Status: <span id="statusLabel" class="badge">Idle</span></div>
-          <div id="speakerBox" style="display: none;">Speaking: <span id="speakerLabel" class="badge">–</span></div>
           <div>Emitted: <span id="tokenCount">0</span> tokens | Session Time: <span id="sessionTimer">0.0s</span></div>
         </div>
       </div>
@@ -227,8 +226,6 @@
     const cursor = document.getElementById('cursor');
     const statusLabel = document.getElementById('statusLabel');
     const tokenCount = document.getElementById('tokenCount');
-    const speakerBox = document.getElementById('speakerBox');
-    const speakerLabel = document.getElementById('speakerLabel');
     const sessionTimer = document.getElementById('sessionTimer');
     const languageSelect = document.getElementById('languageSelect');
     const lookaheadSelect = document.getElementById('lookaheadSelect');
@@ -281,7 +278,6 @@
           cursor.style.display = 'inline-block';
           tokenCounter = 0;
           tokenCount.textContent = '0';
-          speakerLabel.textContent = '–';
           startTime = Date.now();
           timerInterval = setInterval(() => {
             sessionTimer.textContent = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
@@ -296,12 +292,6 @@
             tokenCount.textContent = tokenCounter;
             const box = document.getElementById('transcriptBox');
             box.scrollTop = box.scrollHeight;
-          } else if (msg.type === 'speaker') {
-            // Provisional labels (still talking) are shown dimmed until the turn is final
-            speakerBox.style.display = '';
-            speakerLabel.textContent = msg.label === '?' ? 'new voice…' : msg.label;
-            speakerLabel.style.opacity = msg.provisional ? '0.6' : '1';
-            speakerLabel.style.fontStyle = msg.provisional ? 'italic' : 'normal';
           } else if (msg.type === 'done') {
             statusLabel.textContent = 'Completed';
             statusLabel.style.color = '#2563eb';

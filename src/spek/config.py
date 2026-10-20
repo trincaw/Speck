@@ -107,47 +107,6 @@ def get_voxtral_api_url() -> str:
     return env("VOXTRAL_API_URL", default="https://api.mistral.ai/v1/audio/transcriptions")
 
 
-def get_sherpa_segmentation_model() -> Optional[str]:
-    return env("SPEK_SHERPA_SEGMENTATION_MODEL", "SHERPA_SEGMENTATION_MODEL")
-
-
-def get_sherpa_embedding_model() -> Optional[str]:
-    return env("SPEK_SHERPA_EMBEDDING_MODEL", "SHERPA_EMBEDDING_MODEL")
-
-
-def get_sherpa_asr_type() -> str:
-    return env("SPEK_SHERPA_ASR_TYPE", "SHERPA_ASR_TYPE", default="whisper").lower()
-
-
-def get_sherpa_asr_encoder() -> Optional[str]:
-    return env("SPEK_SHERPA_ASR_ENCODER", "SHERPA_ASR_ENCODER")
-
-
-def get_sherpa_asr_decoder() -> Optional[str]:
-    return env("SPEK_SHERPA_ASR_DECODER", "SHERPA_ASR_DECODER")
-
-
-def get_sherpa_asr_tokens() -> Optional[str]:
-    return env("SPEK_SHERPA_ASR_TOKENS", "SHERPA_ASR_TOKENS")
-
-
-def get_sherpa_num_clusters() -> int:
-    """Target number of speakers (<= 0 auto-detects)."""
-    return env("SPEK_SHERPA_NUM_CLUSTERS", "SHERPA_NUM_CLUSTERS", default=-1, cast=int)
-
-
-def get_sherpa_threshold() -> float:
-    return env("SPEK_SHERPA_THRESHOLD", "SHERPA_CLUSTERING_THRESHOLD", default=0.9, cast=float)
-
-
-def get_sherpa_tag_format() -> str:
-    return env("SPEK_SHERPA_TAG_FORMAT", "SHERPA_TAG_FORMAT", default="block").lower()
-
-
-def get_sherpa_num_threads() -> int:
-    return env("SPEK_SHERPA_NUM_THREADS", "SHERPA_NUM_THREADS", default=2, cast=int)
-
-
 def get_speaker_threshold() -> float:
     """Cosine similarity needed to match a known speaker during live classification."""
     return env("SPEK_SPEAKER_THRESHOLD", default=0.35, cast=float)

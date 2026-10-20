@@ -20,7 +20,6 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
 
 from spek.base import BaseASREngine
-from spek.engines.sherpa import SherpaOnnxASR
 from spek.factory import get_engine as create_engine, list_available_models
 from spek.streamer import BaseAudioStreamSession
 
@@ -121,21 +120,12 @@ async def transcribe_file(
     file: UploadFile = File(...),
     language: str = Form("auto"),
     skip_special_tokens: bool = Form(True),
-    tag_speakers: Optional[bool] = Form(None),
-    tag_format: Optional[str] = Form(None),
-    num_speakers: Optional[int] = Form(None),
 ):
     """Batch transcription of an uploaded audio file (runs off the event loop)."""
     engine = get_engine()
     wav = await run_in_threadpool(_decode_upload, await file.read(), engine.sampling_rate)
-
-    speaker_kwargs = {"tag_speakers": tag_speakers, "tag_format": tag_format, "num_clusters": num_speakers}
     result = await run_in_threadpool(
-        engine.transcribe,
-        wav,
-        language=language,
-        skip_special_tokens=skip_special_tokens,
-        **{k: v for k, v in speaker_kwargs.items() if v is not None},
+        engine.transcribe, wav, language=language, skip_special_tokens=skip_special_tokens
     )
     return {
         "text": result.text,
@@ -152,8 +142,7 @@ async def transcribe_file(
 async def websocket_stream(websocket: WebSocket):
     """Live streaming: first a JSON config message, then float32 16 kHz PCM frames, then {"type": "eof"}.
 
-    Server messages: {"type": "token"}, {"type": "speaker"} (sherpa-onnx: provisional while
-    someone talks, final per turn) and finally {"type": "done"}.
+    Server messages: {"type": "token"} and finally {"type": "done"}.
     """
     await websocket.accept()
     engine = get_engine()
@@ -165,16 +154,12 @@ async def websocket_stream(websocket: WebSocket):
 
     try:
         config = json.loads(await websocket.receive_text())
-        extra: dict[str, Any] = {}
-        if isinstance(engine, SherpaOnnxASR):  # live "who is speaking" events
-            extra["on_speaker"] = lambda event: send({"type": "speaker", **event})
         session = await run_in_threadpool(
             engine.create_stream_session,
             language=config.get("language", "auto"),
             lookahead=int(config.get("lookahead", 6)),
             skip_special_tokens=bool(config.get("skip_special_tokens", True)),
             on_token=lambda token: send({"type": "token", "text": token}),
-            **extra,
         )
         session.start()
 

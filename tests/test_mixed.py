@@ -1,12 +1,8 @@
 """Tests for mixed mode: microphone + system audio as two channels in one transcript."""
 
-from unittest.mock import MagicMock
-
 import numpy as np
-import pytest
 from transformers.audio_utils import load_audio
 
-from spek.engines.sherpa import SherpaOnnxASR
 from spek.mixed import EchoGate, MixedSession, TranscriptMixer
 from spek.system_audio import DualCapture
 
@@ -87,14 +83,38 @@ def test_dual_capture_routes_each_device_to_its_channel():
     assert len(got["system"]) == 3 and not any(b.any() for b in got["system"])
 
 
-def _engine():
-    engine = SherpaOnnxASR(model_id="sherpa-onnx")
-    engine._is_loaded = True
-    engine._transcribe_batch = MagicMock(side_effect=lambda chunks: [f"w{len(c) // SR}" for c in chunks])
-    return engine
+class _FakeSession:
+    """Emits one token per second of audio pushed once the stream is finished."""
+
+    def __init__(self, on_token):
+        self.on_token, self.samples = on_token, 0
+
+    def start(self):
+        return self
+
+    def push_audio(self, chunk):
+        self.samples += len(chunk)
+
+    def finish(self):
+        self.on_token(f"w{self.samples // SR}")
+
+    def join(self, timeout=None):
+        return True
+
+    def stop(self):
+        pass
 
 
-def _run(session, mic, system):
+class _FakeEngine:
+    def create_stream_session(self, on_token, **_):
+        return _FakeSession(on_token)
+
+
+def test_mixed_session_tags_you_and_remote():
+    """Mic audio is always "You"; system audio is tagged with the remote label."""
+    mic = np.concatenate([np.zeros(14 * SR, np.float32), _voice("samples/sample1.flac", 0, 5)])
+    system = _voice("samples/obama.mp3", 5, 6)
+    session = MixedSession(_FakeEngine(), echo_gate=EchoGate(SR))
     session.start()
     n = max(len(mic), len(system))
     mic, system = np.pad(mic, (0, n - len(mic))), np.pad(system, (0, n - len(system)))
@@ -104,21 +124,6 @@ def _run(session, mic, system):
     session.finish()
     assert session.join(timeout=60)
 
-
-@pytest.mark.parametrize("classify", [True, False])
-def test_mixed_session_tags_you_and_remote_speakers(classify):
-    """Mic voice is always "You"; two remote voices are told apart only when classifying."""
-    gap = np.zeros(SR, np.float32)
-    mic = np.concatenate([np.zeros(14 * SR, np.float32), _voice("samples/sample1.flac", 0, 5)])
-    system = np.concatenate([_voice("samples/obama.mp3", 5, 6), gap, _voice("samples/bcn_weather.mp3", 0, 6)])
-    session = MixedSession(_engine(), classify=classify, echo_gate=EchoGate(SR))
-    _run(session, mic, system)
-
-    # Channels finish independently (audio is pushed faster than real time), so check sets
-    by_channel = {}
-    for s in session.segments:
-        by_channel.setdefault(s["channel"], set()).add(s["speaker"])
-    assert by_channel["mic"] == {"You"}
-    assert by_channel["system"] == ({"Speaker 0", "Speaker 1"} if classify else {"Remote"})
-    assert "[You]: " in session.transcript
-    assert ("[Speaker 1]: " if classify else "[Remote]: ") in session.transcript
+    by_channel = {s["channel"]: s["speaker"] for s in session.segments}
+    assert by_channel == {"mic": "You", "system": "Remote"}
+    assert "[You]: " in session.transcript and "[Remote]: " in session.transcript
