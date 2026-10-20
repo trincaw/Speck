@@ -10,11 +10,11 @@ from typing import TYPE_CHECKING, Any, Callable, Generator, Optional, Union
 import numpy as np
 import torch
 
-from spek.utils import to_mono_float32
+from speck.utils import to_mono_float32
 
 if TYPE_CHECKING:
-    from spek.speakers import SpeakerClassifier
-    from spek.streamer import BaseAudioStreamSession
+    from speck.speakers import SpeakerClassifier
+    from speck.streamer import BaseAudioStreamSession
 
 AudioInput = Union[str, np.ndarray, torch.Tensor]
 
@@ -47,7 +47,7 @@ def rtf(elapsed: float, duration: float) -> float:
 
 
 class BaseASREngine(ABC):
-    """Abstract base class for all speech recognition engines in Spek."""
+    """Abstract base class for all speech recognition engines in Speck."""
 
     def __init__(
         self,
@@ -135,7 +135,7 @@ class BaseASREngine(ABC):
         With `speakers`, every utterance is split into single-speaker turns first and the
         output is speaker-labelled (`SpeakerStreamSession`), whatever the engine.
         """
-        from spek.streamer import SpeakerStreamSession, UtteranceStreamSession
+        from speck.streamer import SpeakerStreamSession, UtteranceStreamSession
         if speakers is not None:
             kwargs["speakers"] = speakers
         return (SpeakerStreamSession if speakers is not None else UtteranceStreamSession)(

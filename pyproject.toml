@@ -1,5 +1,5 @@
 [project]
-name = "spek"
+name = "speck"
 version = "0.2.0"
 description = "Model-agnostic real-time ASR with live speaker classification"
 readme = "README.md"
@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.scripts]
-spek = "spek.cli:main"
+speck = "speck.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.13.0,<0.14.0"]

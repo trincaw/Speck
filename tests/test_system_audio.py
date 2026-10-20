@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from spek.system_audio import Activity, ActivityDetector, AudioStream, SystemAudioCapture, SystemAudioListener
+from speck.system_audio import Activity, ActivityDetector, AudioStream, SystemAudioCapture, SystemAudioListener
 
 
 def _pactl_item(index, device, app, binary="", pid="1", corked=False, media="playStream", role=None):
@@ -42,7 +42,7 @@ def test_ignores_paused_notifications_own_and_unmatched_streams():
     streams = [
         _play(1, 60, "Firefox", "firefox", corked=True),
         _play(2, 60, "Slack", "slack", role="event"),
-        _play(3, 60, "spek", "parec"),
+        _play(3, 60, "speck", "parec"),
         _play(4, 60, "Spotify", "spotify"),
     ]
     assert not ActivityDetector().evaluate(streams[:3], []).active

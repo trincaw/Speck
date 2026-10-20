@@ -12,9 +12,9 @@ import requests
 import soundfile as sf
 import torch
 
-from spek.base import AudioInput, BaseASREngine, TranscriptionResult, rtf
-from spek.config import get_mistral_api_key, get_voxtral_api_url, get_voxtral_backend, get_voxtral_model
-from spek.utils import LanguageTier
+from speck.base import AudioInput, BaseASREngine, TranscriptionResult, rtf
+from speck.config import get_mistral_api_key, get_voxtral_api_url, get_voxtral_backend, get_voxtral_model
+from speck.utils import LanguageTier
 
 logger = logging.getLogger(__name__)
 

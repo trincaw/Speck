@@ -10,12 +10,12 @@ from typing import TYPE_CHECKING, Callable, Generator, Optional
 
 import numpy as np
 
-from spek.utils import to_mono_float32
+from speck.utils import to_mono_float32
 
 if TYPE_CHECKING:
-    from spek.base import BaseASREngine
-    from spek.speakers import SpeakerClassifier, SpeakerMatch
-    from spek.vad import Utterance
+    from speck.base import BaseASREngine
+    from speck.speakers import SpeakerClassifier, SpeakerMatch
+    from speck.vad import Utterance
 
 logger = logging.getLogger(__name__)
 
@@ -191,7 +191,7 @@ class UtteranceStreamSession(BaseAudioStreamSession):
 
     def __init__(self, *args, vad_min_silence: float = 0.4, vad_max_speech: float = 15.0, **kwargs):
         super().__init__(*args, **kwargs)
-        from spek.vad import VadSegmenter
+        from speck.vad import VadSegmenter
         self._vad = VadSegmenter(self.sr, min_silence=vad_min_silence, max_speech=vad_max_speech)
 
     def _run_inference_worker(self) -> None:
@@ -244,8 +244,8 @@ class SpeakerStreamSession(UtteranceStreamSession):
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
-        from spek.mixed import TranscriptMixer
-        from spek.speakers import LiveSpeakerPreview
+        from speck.mixed import TranscriptMixer
+        from speck.speakers import LiveSpeakerPreview
 
         if speakers.embedder.sample_rate != self.sr:
             raise ValueError(f"Speaker embedder runs at {speakers.embedder.sample_rate} Hz, engine at {self.sr} Hz")
@@ -304,7 +304,7 @@ class SpeakerStreamSession(UtteranceStreamSession):
 
     @property
     def transcript(self) -> str:
-        from spek.mixed import TranscriptMixer
+        from speck.mixed import TranscriptMixer
 
         mixer = TranscriptMixer(tag_format=self.tag_format)
         for s in self.segments:

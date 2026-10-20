@@ -1,4 +1,4 @@
-"""Command-line interface for Spek."""
+"""Command-line interface for Speck."""
 
 from __future__ import annotations
 
@@ -13,9 +13,9 @@ from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
-from spek.base import BaseASREngine
-from spek.config import get_mistral_api_key, get_model_name, get_speaker_threshold, load_env_file
-from spek.factory import get_engine, list_available_models
+from speck.base import BaseASREngine
+from speck.config import get_mistral_api_key, get_model_name, get_speaker_threshold, load_env_file
+from speck.factory import get_engine, list_available_models
 
 console = Console()
 
@@ -24,7 +24,7 @@ def print_banner(engine: Optional[BaseASREngine] = None) -> None:
     if engine:
         title, sub = engine.name, f"Model ID: {engine.model_id} | Device: {engine.device}"
     else:
-        title, sub = f"Spek ASR Engine ({get_model_name()})", "Model-Agnostic Real-Time Speech Recognition"
+        title, sub = f"Speck ASR Engine ({get_model_name()})", "Model-Agnostic Real-Time Speech Recognition"
     console.print(Panel.fit(f"[bold green]{title}[/bold green]\n[dim]{sub}[/dim]", border_style="green"))
 
 
@@ -55,7 +55,7 @@ def speaker_factory(args: argparse.Namespace, sample_rate: int):
     """Load the embedding model and enrollment samples once; return a factory of fresh classifiers."""
     from transformers.audio_utils import load_audio
 
-    from spek.speakers import SpeakerClassifier, SpeakerEmbedder
+    from speck.speakers import SpeakerClassifier, SpeakerEmbedder
 
     with console.status("[bold green]Loading speaker-embedding model..."):
         embedder = SpeakerEmbedder(sample_rate=sample_rate)
@@ -105,7 +105,7 @@ def handle_models(args):
     console.print(table)
 
     has_key = bool(get_mistral_api_key())
-    console.print(f"\nSPEK_MODEL: [yellow]{get_model_name()}[/yellow]")
+    console.print(f"\nSPECK_MODEL: [yellow]{get_model_name()}[/yellow]")
     console.print(f"MISTRAL_API_KEY: {'[green]set' if has_key else '[red]not set (needed for Voxtral API)'}[/]")
     console.print("[dim]Switch models via .env or --model <id>.[/dim]\n")
 
@@ -229,7 +229,7 @@ def handle_listen(args):
     from datetime import datetime
     from pathlib import Path
 
-    from spek import system_audio as sa
+    from speck import system_audio as sa
 
     try:
         sa.check_available()
@@ -301,8 +301,8 @@ def handle_mixed(args):
     import threading
     from pathlib import Path
 
-    from spek import system_audio as sa
-    from spek.mixed import EchoGate, MixedSession
+    from speck import system_audio as sa
+    from speck.mixed import EchoGate, MixedSession
 
     try:
         sa.check_available()
@@ -380,8 +380,8 @@ def handle_speakers(args):
     """Live speaker classification only (no ASR): who is speaking, turn by turn."""
     from transformers.audio_utils import load_audio
 
-    from spek.speakers import LiveSpeakerPreview
-    from spek.vad import VadSegmenter
+    from speck.speakers import LiveSpeakerPreview
+    from speck.vad import VadSegmenter
 
     sr = 16000
     vad = VadSegmenter(sr, min_silence=args.min_silence)
@@ -431,7 +431,7 @@ def handle_speakers(args):
 
 def build_parser() -> argparse.ArgumentParser:
     engine_opts = argparse.ArgumentParser(add_help=False)
-    engine_opts.add_argument("--model", default=None, help="Engine alias or checkpoint (overrides SPEK_MODEL)")
+    engine_opts.add_argument("--model", default=None, help="Engine alias or checkpoint (overrides SPECK_MODEL)")
     engine_opts.add_argument("--device", default=None, help="'cuda' or 'cpu' (default: auto)")
 
     asr_opts = argparse.ArgumentParser(add_help=False)
@@ -457,7 +457,7 @@ def build_parser() -> argparse.ArgumentParser:
     diarize_opts.add_argument("--speakers", action="store_true",
                               help="Label who is speaking: split each utterance into speaker turns, then transcribe")
 
-    parser = argparse.ArgumentParser(prog="spek", description="Spek - model-agnostic ASR and streaming engine")
+    parser = argparse.ArgumentParser(prog="speck", description="Speck - model-agnostic ASR and streaming engine")
     sub = parser.add_subparsers(dest="command", required=True)
 
     def add(name: str, func, help: str, parents: list) -> argparse.ArgumentParser:
@@ -494,7 +494,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--me", default="You", help="Label for the microphone channel (default: %(default)s)")
     p.add_argument("--remote", default="Remote",
                    help="Label for the system audio channel (default: %(default)s; --speakers labels each remote voice)")
-    p.add_argument("--mic-source", default="@DEFAULT_SOURCE@", help="Microphone source (see `spek listen --list`)")
+    p.add_argument("--mic-source", default="@DEFAULT_SOURCE@", help="Microphone source (see `speck listen --list`)")
     p.add_argument("--system-source", default="@DEFAULT_MONITOR@", help="System audio source (a sink monitor)")
     p.add_argument("--echo-guard", action=argparse.BooleanOptionalAction, default=True,
                    help="Mute mic audio that is just the speakers' echo (default: on; off with headphones)")

@@ -1,8 +1,8 @@
-"""Spek - Model-Agnostic ASR and Streaming Engine."""
+"""Speck - Model-Agnostic ASR and Streaming Engine."""
 
 from importlib.metadata import PackageNotFoundError, version as _version
 
-from spek.asr import (
+from speck.asr import (
     BaseASREngine,
     BenchmarkResult,
     NemotronASR,
@@ -11,11 +11,11 @@ from spek.asr import (
     VoxtralMiniTranscribe,
     get_engine,
 )
-from spek.config import load_env_file
-from spek.speakers import LiveSpeakerPreview, SpeakerClassifier, SpeakerEmbedder, SpeakerTurn
-from spek.vad import VadSegmenter
-from spek.streamer import LiveAudioStreamSession, SpeakerStreamSession
-from spek.utils import LOOKAHEAD_CONFIGS, SUPPORTED_LANGUAGES
+from speck.config import load_env_file
+from speck.speakers import LiveSpeakerPreview, SpeakerClassifier, SpeakerEmbedder, SpeakerTurn
+from speck.vad import VadSegmenter
+from speck.streamer import LiveAudioStreamSession, SpeakerStreamSession
+from speck.utils import LOOKAHEAD_CONFIGS, SUPPORTED_LANGUAGES
 
 __all__ = [
     "BaseASREngine",
@@ -38,6 +38,6 @@ __all__ = [
 ]
 
 try:
-    __version__ = _version("spek")
+    __version__ = _version("speck")
 except PackageNotFoundError:  # running from a source tree without install
     __version__ = "0+unknown"

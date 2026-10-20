@@ -1278,7 +1278,7 @@ wheels = [
 ]
 
 [[package]]
-name = "spek"
+name = "speck"
 version = "0.2.0"
 source = { editable = "." }
 dependencies = [

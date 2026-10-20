@@ -18,10 +18,10 @@ from typing import TYPE_CHECKING, Any, Callable, Optional
 
 import numpy as np
 
-from spek.utils import to_mono_float32
+from speck.utils import to_mono_float32
 
 if TYPE_CHECKING:
-    from spek.speakers import SpeakerClassifier
+    from speck.speakers import SpeakerClassifier
 
 logger = logging.getLogger(__name__)
 

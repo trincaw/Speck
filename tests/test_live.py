@@ -3,9 +3,9 @@
 import numpy as np
 from transformers.audio_utils import load_audio
 
-from spek.base import BaseASREngine, TranscriptionResult
-from spek.speakers import LiveSpeakerPreview, SpeakerClassifier, SpeakerEmbedder, VadSegmenter
-from spek.streamer import AudioBuffer, SpeakerStreamSession
+from speck.base import BaseASREngine, TranscriptionResult
+from speck.speakers import LiveSpeakerPreview, SpeakerClassifier, SpeakerEmbedder, VadSegmenter
+from speck.streamer import AudioBuffer, SpeakerStreamSession
 
 
 def test_audio_buffer_absolute_indexing_and_discard():

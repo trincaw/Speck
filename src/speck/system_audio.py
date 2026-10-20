@@ -27,7 +27,7 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-CLIENT_NAME = "spek"
+CLIENT_NAME = "speck"
 # Streams that are never "real" activity: ourselves, volume meters, notification sounds.
 IGNORED_APPS = {CLIENT_NAME, "pavucontrol", "pulseaudio volume control", "pwvucontrol", "plasmapa"}
 IGNORED_MEDIA = {"peak detect"}

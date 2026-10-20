@@ -7,7 +7,7 @@ from typing import Optional
 
 import numpy as np
 
-from spek.utils import resolve_hf_file
+from speck.utils import resolve_hf_file
 
 VAD_REPO = "csukuangfj/vad"
 VAD_FILE = "silero_vad.onnx"

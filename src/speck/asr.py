@@ -1,14 +1,14 @@
 """Speech recognition models and engine interfaces.
 
-Main entry point for ASR inference engines in Spek.
+Main entry point for ASR inference engines in Speck.
 """
 
 from __future__ import annotations
 
-from spek.base import BaseASREngine, BenchmarkResult, TranscriptionResult
-from spek.engines.nemotron import NemotronASR
-from spek.engines.voxtral import VoxtralASR, VoxtralMiniTranscribe
-from spek.factory import get_engine, list_available_models, register_engine
+from speck.base import BaseASREngine, BenchmarkResult, TranscriptionResult
+from speck.engines.nemotron import NemotronASR
+from speck.engines.voxtral import VoxtralASR, VoxtralMiniTranscribe
+from speck.factory import get_engine, list_available_models, register_engine
 
 __all__ = [
     "BaseASREngine",

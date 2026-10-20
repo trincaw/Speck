@@ -12,9 +12,9 @@ import numpy as np
 import torch
 from transformers import AutoModelForRNNT, AutoProcessor, TextIteratorStreamer
 
-from spek.base import AudioInput, BaseASREngine, TranscriptionResult, rtf
-from spek.streamer import BaseAudioStreamSession
-from spek.utils import LOOKAHEAD_CONFIGS, SUPPORTED_LANGUAGES, parse_language_tag
+from speck.base import AudioInput, BaseASREngine, TranscriptionResult, rtf
+from speck.streamer import BaseAudioStreamSession
+from speck.utils import LOOKAHEAD_CONFIGS, SUPPORTED_LANGUAGES, parse_language_tag
 
 logger = logging.getLogger(__name__)
 

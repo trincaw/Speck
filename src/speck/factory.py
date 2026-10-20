@@ -8,10 +8,10 @@ from typing import Any, Optional
 
 import torch
 
-from spek.base import BaseASREngine
-from spek.config import get_device, get_dtype_str, get_model_name
-from spek.engines.nemotron import NemotronASR
-from spek.engines.voxtral import VoxtralASR
+from speck.base import BaseASREngine
+from speck.config import get_device, get_dtype_str, get_model_name
+from speck.engines.nemotron import NemotronASR
+from speck.engines.voxtral import VoxtralASR
 
 logger = logging.getLogger(__name__)
 
@@ -95,12 +95,12 @@ def get_engine(
     dtype: Optional[torch.dtype] = None,
     **kwargs: Any,
 ) -> BaseASREngine:
-    """Instantiate an ASR engine by name/alias, defaulting to SPEK_MODEL from .env.
+    """Instantiate an ASR engine by name/alias, defaulting to SPECK_MODEL from .env.
 
     Args:
         model: Alias or checkpoint (e.g. 'nemotron', 'voxtral', 'nvidia/...').
         device: 'cuda', 'cpu', or None for auto.
-        dtype: torch dtype, or None for SPEK_DTYPE / auto.
+        dtype: torch dtype, or None for SPECK_DTYPE / auto.
         kwargs: Engine-specific constructor arguments.
     """
     requested = (model or get_model_name()).strip()
@@ -121,7 +121,7 @@ def get_engine(
 
 
 def list_available_models() -> list[dict[str, Any]]:
-    """Metadata for built-in engines, flagging the one selected by SPEK_MODEL."""
+    """Metadata for built-in engines, flagging the one selected by SPECK_MODEL."""
     active = _resolve_spec(get_model_name().lower())
     return [
         {

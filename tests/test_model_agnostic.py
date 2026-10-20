@@ -7,15 +7,15 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from spek.asr import BaseASREngine, NemotronASR, VoxtralASR, get_engine
-from spek.config import load_env_file
-from spek.factory import _ENGINE_REGISTRY, list_available_models, register_engine
+from speck.asr import BaseASREngine, NemotronASR, VoxtralASR, get_engine
+from speck.config import load_env_file
+from speck.factory import _ENGINE_REGISTRY, list_available_models, register_engine
 
 
 def test_env_loader_parses_properly(tmp_path):
     env_content = """
     # Comment line
-    SPEK_MODEL=voxtral-mini-transcribe-2
+    SPECK_MODEL=voxtral-mini-transcribe-2
     MISTRAL_API_KEY="test-secret-key-12345"
     VOXTRAL_BACKEND='api'
     export SERVER_PORT=9000
@@ -25,7 +25,7 @@ def test_env_loader_parses_properly(tmp_path):
     env_file.write_text(env_content)
 
     loaded = load_env_file(filepath=env_file, override=True)
-    assert loaded["SPEK_MODEL"] == "voxtral-mini-transcribe-2"
+    assert loaded["SPECK_MODEL"] == "voxtral-mini-transcribe-2"
     assert loaded["MISTRAL_API_KEY"] == "test-secret-key-12345"
     assert loaded["VOXTRAL_BACKEND"] == "api"
     assert loaded["SERVER_PORT"] == "9000"

@@ -1,4 +1,4 @@
-"""Configuration management and .env loader for Spek."""
+"""Configuration management and .env loader for Speck."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ T = TypeVar("T")
 
 def _find_env_file() -> Optional[Path]:
     candidates = [
-        os.environ.get("SPEK_ENV_FILE"),
+        os.environ.get("SPECK_ENV_FILE"),
         Path.cwd() / ".env",
     ]
     for candidate in candidates:
@@ -35,7 +35,7 @@ def load_env_file(filepath: Optional[str | Path] = None, override: bool = False)
     """Parse KEY=VALUE pairs from a .env file into os.environ.
 
     Args:
-        filepath: Path to a .env file; searches SPEK_ENV_FILE and CWD if None.
+        filepath: Path to a .env file; searches SPECK_ENV_FILE and CWD if None.
         override: Overwrite variables already present in os.environ.
     """
     path = Path(filepath) if filepath else _find_env_file()
@@ -76,15 +76,15 @@ def env(*keys: str, default: T = None, cast: Callable[[str], T] = str) -> T:
 
 
 def get_model_name() -> str:
-    return env("SPEK_MODEL", "ASR_MODEL", default="nemotron")
+    return env("SPECK_MODEL", "ASR_MODEL", default="nemotron")
 
 
 def get_device() -> Optional[str]:
-    return env("SPEK_DEVICE", "DEVICE")
+    return env("SPECK_DEVICE", "DEVICE")
 
 
 def get_dtype_str() -> Optional[str]:
-    return env("SPEK_DTYPE")
+    return env("SPECK_DTYPE")
 
 
 def get_mistral_api_key() -> Optional[str]:
@@ -106,4 +106,4 @@ def get_voxtral_api_url() -> str:
 
 def get_speaker_threshold() -> float:
     """Cosine similarity needed to match a known speaker during live classification."""
-    return env("SPEK_SPEAKER_THRESHOLD", default=0.35, cast=float)
+    return env("SPECK_SPEAKER_THRESHOLD", default=0.35, cast=float)

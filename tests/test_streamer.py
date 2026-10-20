@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from spek.streamer import AudioBuffer
+from speck.streamer import AudioBuffer
 
 
 def test_audio_buffer_absolute_indexing_and_discard():

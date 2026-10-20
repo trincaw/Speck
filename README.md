@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/spek.png" alt="Spek" width="200" />
+  <img src="assets/speck.png" alt="Speck" width="200" />
 </p>
 
-# Spek
+# Speck
 
 Model-agnostic speech recognition with real-time streaming and live speaker labels.
 
@@ -14,26 +14,26 @@ Model-agnostic speech recognition with real-time streaming and live speaker labe
 ## Install
 
 ```bash
-pip install spek
+pip install speck
 ```
 
-Installs the `spek` command and the Python library. Python 3.12+. Configure through environment variables
-(see [.env.example](.env.example)); the CLI loads a `.env` automatically, library users can call `spek.load_env_file()`.
+Installs the `speck` command and the Python library. Python 3.12+. Configure through environment variables
+(see [.env.example](.env.example)); the CLI loads a `.env` automatically, library users can call `speck.load_env_file()`.
 
 ## CLI
 
 | Command | Does |
 |---|---|
-| `spek transcribe AUDIO` | Offline transcription |
-| `spek stream AUDIO` | Streaming transcription of a file (`--simulate-realtime`) |
-| `spek mic` | Live microphone transcription |
-| `spek speakers [AUDIO]` | Live "who is speaking", no transcription |
-| `spek listen` | Auto-transcribe calls and videos playing on this machine (Linux) |
-| `spek mixed` | Mic + system audio: `[You]` vs. `[Remote]` (Linux) |
-| `spek benchmark AUDIO` | Real-time factor per latency preset |
-| `spek models` / `spek languages` | List engines / languages |
+| `speck transcribe AUDIO` | Offline transcription |
+| `speck stream AUDIO` | Streaming transcription of a file (`--simulate-realtime`) |
+| `speck mic` | Live microphone transcription |
+| `speck speakers [AUDIO]` | Live "who is speaking", no transcription |
+| `speck listen` | Auto-transcribe calls and videos playing on this machine (Linux) |
+| `speck mixed` | Mic + system audio: `[You]` vs. `[Remote]` (Linux) |
+| `speck benchmark AUDIO` | Real-time factor per latency preset |
+| `speck models` / `speck languages` | List engines / languages |
 
-Common flags (`spek <command> --help` for the rest):
+Common flags (`speck <command> --help` for the rest):
 
 | Flag | Meaning |
 |---|---|
@@ -46,10 +46,10 @@ Common flags (`spek <command> --help` for the rest):
 | `--num-speakers N` | Cap on speakers discovered |
 
 ```bash
-spek transcribe samples/bcn_weather.mp3
-spek mic --speakers --enroll Alice=alice.wav
-spek listen --app discord --save-dir ~/transcripts     # --list shows playing apps
-spek mixed --speakers --save call.txt                  # --me/--remote rename labels, --no-echo-guard with headphones
+speck transcribe samples/bcn_weather.mp3
+speck mic --speakers --enroll Alice=alice.wav
+speck listen --app discord --save-dir ~/transcripts     # --list shows playing apps
+speck mixed --speakers --save call.txt                  # --me/--remote rename labels, --no-echo-guard with headphones
 ```
 
 `listen` and `mixed` need PulseAudio/PipeWire (`pactl`, `parec`).
@@ -57,9 +57,9 @@ spek mixed --speakers --save call.txt                  # --me/--remote rename la
 ## Library
 
 ```python
-from spek import get_engine, SpeakerClassifier, SpeakerEmbedder
+from speck import get_engine, SpeakerClassifier, SpeakerEmbedder
 
-engine = get_engine("nemotron").load()      # defaults to SPEK_MODEL
+engine = get_engine("nemotron").load()      # defaults to SPECK_MODEL
 print(engine.transcribe("audio.mp3", language="en-US").text)
 
 # live: push 16 kHz mono float32 chunks, read text as it arrives
@@ -71,7 +71,7 @@ session.push_audio(chunk)
 session.finish(); session.join()
 ```
 
-Add your own engine by subclassing `BaseASREngine` and calling `spek.factory.register_engine(alias, cls)`.
+Add your own engine by subclassing `BaseASREngine` and calling `speck.factory.register_engine(alias, cls)`.
 
 ## Tests
 

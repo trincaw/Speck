@@ -15,8 +15,8 @@ from typing import Optional
 
 import numpy as np
 
-from spek.utils import resolve_hf_file, to_mono_float32
-from spek.vad import Utterance, VadSegmenter  # noqa: F401  (re-exported)
+from speck.utils import resolve_hf_file, to_mono_float32
+from speck.vad import Utterance, VadSegmenter  # noqa: F401  (re-exported)
 
 logger = logging.getLogger(__name__)
 

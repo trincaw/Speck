@@ -1,8 +1,8 @@
 """Tests for Nemotron 3.5 ASR implementation."""
 
 import pytest
-from spek import NemotronASR, LOOKAHEAD_CONFIGS, SUPPORTED_LANGUAGES
-from spek.utils import parse_language_tag
+from speck import NemotronASR, LOOKAHEAD_CONFIGS, SUPPORTED_LANGUAGES
+from speck.utils import parse_language_tag
 
 
 def test_language_metadata():
@@ -67,7 +67,7 @@ def test_transcribe_streaming(asr_engine):
 def test_live_stream_session(asr_engine):
     import time
     from transformers.audio_utils import load_audio
-    from spek.streamer import LiveAudioStreamSession
+    from speck.streamer import LiveAudioStreamSession
 
     audio = load_audio("samples/bcn_weather.mp3", sampling_rate=16000)
     session = LiveAudioStreamSession(asr_engine, language="en-US", lookahead=6)

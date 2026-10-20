@@ -3,8 +3,8 @@
 import numpy as np
 from transformers.audio_utils import load_audio
 
-from spek.mixed import EchoGate, MixedSession, TranscriptMixer
-from spek.system_audio import DualCapture
+from speck.mixed import EchoGate, MixedSession, TranscriptMixer
+from speck.system_audio import DualCapture
 
 SR = 16000
 
@@ -133,7 +133,7 @@ def test_mixed_session_labels_each_remote_voice():
     """With a classifier, mic stays "You" and each remote voice gets its own Speaker N."""
     from test_live import _StubASR, _two_voices
 
-    from spek.speakers import SpeakerClassifier, SpeakerEmbedder
+    from speck.speakers import SpeakerClassifier, SpeakerEmbedder
 
     remote, _ = _two_voices(gap=1.0)
     mic = np.concatenate([np.zeros(len(remote), np.float32), _voice("samples/sample1.flac", 6, 4), np.zeros(SR, np.float32)])
