@@ -10,8 +10,6 @@ import pytest
 from spek.asr import BaseASREngine, NemotronASR, VoxtralASR, get_engine
 from spek.config import load_env_file
 from spek.factory import _ENGINE_REGISTRY, list_available_models, register_engine
-from spek.server import app, get_engine as server_get_engine, set_engine
-from fastapi.testclient import TestClient
 
 
 def test_env_loader_parses_properly(tmp_path):
@@ -145,34 +143,3 @@ def test_voxtral_stream_transcribe():
         text = "".join(chunks).strip()
         assert "Streaming test" in text
         assert "from Voxtral" in text
-
-
-def test_server_models_endpoint():
-    client = TestClient(app)
-    response = client.get("/models")
-    assert response.status_code == 200
-    data = response.json()
-    assert "models" in data
-    model_ids = [m["id"] for m in data["models"]]
-    assert "nemotron" in model_ids
-    assert "voxtral-mini-transcribe-2" in model_ids
-
-
-def test_server_with_voxtral_engine():
-    client = TestClient(app)
-
-    voxtral = VoxtralASR(backend="api", api_key="dummy")
-    set_engine(voxtral)
-
-    res_health = client.get("/health")
-    assert res_health.status_code == 200
-    health_data = res_health.json()
-    assert "Voxtral" in health_data["engine_name"]
-    assert health_data["backend"] == "api"
-
-    res_ui = client.get("/")
-    assert res_ui.status_code == 200
-    assert "Voxtral" in res_ui.text
-
-    # Reset back to default for other tests
-    set_engine(NemotronASR())

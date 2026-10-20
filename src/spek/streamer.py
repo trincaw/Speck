@@ -1,4 +1,4 @@
-"""Push-based live streaming sessions (microphone, WebSocket, queues)."""
+"""Push-based live streaming sessions (microphone, sockets, queues)."""
 
 from __future__ import annotations
 

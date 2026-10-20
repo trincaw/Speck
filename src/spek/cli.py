@@ -426,19 +426,6 @@ def handle_speakers(args):
                   f"({', '.join(f'{s.label}×{s.count}' for s in classifier.speakers)}){merged}")
 
 
-def handle_serve(args):
-    if args.model:
-        os.environ["SPEK_MODEL"] = args.model
-    import uvicorn
-
-    from spek.server import get_engine as server_engine
-
-    engine = server_engine()
-    print_banner(engine)
-    console.print(f"[bold green]Serving at[/bold green] [cyan]http://{args.host}:{args.port}[/cyan]\n")
-    uvicorn.run("spek.server:app", host=args.host, port=args.port, log_level="info")
-
-
 # --- argument parsing -----------------------------------------------------------
 
 
@@ -521,11 +508,6 @@ def build_parser() -> argparse.ArgumentParser:
     p = add("benchmark", handle_benchmark, "Benchmark streaming latency presets", [engine_opts])
     p.add_argument("audio")
     p.add_argument("--language", default="auto")
-
-    p = add("serve", handle_serve, "Run the web UI + REST/WebSocket API", [])
-    p.add_argument("--model", default=None)
-    p.add_argument("--host", default="0.0.0.0")
-    p.add_argument("--port", type=int, default=8000)
     return parser
 
 

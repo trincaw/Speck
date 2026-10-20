@@ -13,21 +13,19 @@ Model-agnostic speech recognition with real-time streaming and live speaker clas
 
 ## Install
 
-Spek is a library first. The core install has no CLI or web-server dependencies:
+Spek is a library first. The core install has no CLI dependencies:
 
 ```bash
 pip install spek                # library only
 pip install "spek[audio]"       # + sounddevice, for mic capture in your own code
 pip install "spek[cli]"         # + the `spek` command (rich, sounddevice)
-pip install "spek[server]"      # + web UI / REST / WebSocket server (fastapi, uvicorn)
-pip install "spek[all]"         # everything
 ```
 
 Configuration is read from environment variables (`SPEK_MODEL`, `SPEK_DEVICE`, `MISTRAL_API_KEY`...).
 Importing `spek` does not touch the environment; call `spek.load_env_file()` yourself to load a `.env`
-(the CLI and server do this automatically).
+(the CLI does this automatically).
 
-Development: `uv sync` (installs every extra), `cp .env.example .env`.
+Development: `uv sync` (installs the CLI extra), `cp .env.example .env`.
 
 ## CLI (`spek[cli]`)
 
@@ -43,7 +41,6 @@ uv run spek mixed --save call.txt                         # mic + system audio: 
 uv run spek mixed --speakers                              # [You] vs. [Speaker 0], [Speaker 1]...
 uv run spek speakers                                      # live "who is speaking"
 uv run spek speakers --enroll Alice=alice.wav --enroll Bob=bob.wav
-uv run spek serve --port 8000                             # web UI + API
 uv run spek benchmark samples/bcn_weather.mp3
 uv run spek models
 ```
@@ -56,7 +53,7 @@ someone is still talking a provisional label is shown (`spek speakers`). Tune wi
 
 ### Speaker-labelled transcripts (any engine)
 
-`--speakers` on `mic` / `listen` / `mixed` (or `"speakers": true` in the WebSocket config, or
+`--speakers` on `mic` / `listen` / `mixed` (or
 `engine.create_stream_session(speakers=SpeakerClassifier(SpeakerEmbedder()))`) runs:
 
 | Stage | Input | Output |
@@ -67,9 +64,8 @@ someone is still talking a provisional label is shown (`spek speakers`). Tune wi
 
 Speaker turns are found *before* ASR, so each turn's text gets that turn's label. No ASR timestamps
 and no merge step are needed, so it works with any engine that implements `transcribe()`. Text
-appears about 1 s after a turn ends. The WebSocket also sends `speaker` events (provisional label
-while someone is talking) and `segment` events. When two discovered speakers turn out to be the same
-person, `session.segments` / `session.transcript` (and the final `done` message) use the merged
+appears about 1 s after a turn ends. When two discovered speakers turn out to be the same
+person, `session.segments` / `session.transcript` use the merged
 label for all their turns.
 
 ### System audio (Linux)
@@ -103,13 +99,6 @@ session = engine.create_stream_session(on_token=lambda t: print(t, end="")).star
 session.push_audio(pcm_chunk)  # 16 kHz float32, from mic / socket
 session.finish(); session.join()
 ```
-
-## Server (`spek[server]`)
-
-- `GET /` – browser mic UI
-- `WS /ws/stream` – JSON config, then float32 PCM frames, then `{"type": "eof"}`
-- `POST /transcribe` – audio file upload
-- `GET /health`, `GET /models`
 
 ## Tests
 
