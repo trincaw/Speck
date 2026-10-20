@@ -51,6 +51,27 @@ def parse_enroll(values: list[str]) -> dict[str, str]:
     return enroll
 
 
+def speaker_factory(args: argparse.Namespace, sample_rate: int):
+    """Load the embedding model and enrollment samples once; return a factory of fresh classifiers."""
+    from transformers.audio_utils import load_audio
+
+    from spek.speakers import SpeakerClassifier, SpeakerEmbedder
+
+    with console.status("[bold green]Loading speaker-embedding model..."):
+        embedder = SpeakerEmbedder(sample_rate=sample_rate)
+        voices = {name: load_audio(path, sampling_rate=sample_rate) for name, path in parse_enroll(args.enroll).items()}
+    if voices:
+        console.print(f"[bold]Enrolled:[/bold] {', '.join(voices)}")
+
+    def new_classifier() -> SpeakerClassifier:
+        classifier = SpeakerClassifier(embedder, threshold=args.speaker_threshold, max_speakers=args.num_speakers or 0)
+        for name, wav in voices.items():
+            classifier.enroll(name, wav)
+        return classifier
+
+    return new_classifier
+
+
 def stream_microphone(session, sample_rate: int) -> None:
     """Feed the default microphone into a session until Ctrl+C."""
     import sounddevice as sd
@@ -184,6 +205,7 @@ def handle_mic(args):
     engine = load_engine(args)
 
     console.print(f"[bold]Language:[/bold] [yellow]{args.language}[/yellow]  [bold]Preset:[/bold] [magenta]{preset_label(engine, args.lookahead)}[/magenta]")
+    new_classifier = speaker_factory(args, engine.sampling_rate) if args.speakers else None
     console.print("[bold green]Listening... press Ctrl+C to stop.[/bold green]\n")
 
     session = engine.create_stream_session(
@@ -191,6 +213,7 @@ def handle_mic(args):
         lookahead=args.lookahead,
         skip_special_tokens=not args.keep_tag,
         on_token=lambda t: (sys.stdout.write(t), sys.stdout.flush()),
+        speakers=new_classifier() if new_classifier else None,
     ).start()
     try:
         stream_microphone(session, engine.sampling_rate)
@@ -219,6 +242,7 @@ def handle_listen(args):
     save_dir = Path(args.save_dir).expanduser() if args.save_dir else None
     if save_dir:
         save_dir.mkdir(parents=True, exist_ok=True)
+    new_classifier = speaker_factory(args, engine.sampling_rate) if args.speakers else None
 
     def new_session():
         return engine.create_stream_session(
@@ -226,6 +250,7 @@ def handle_listen(args):
             lookahead=args.lookahead,
             skip_special_tokens=not args.keep_tag,
             on_token=lambda t: (sys.stdout.write(t), sys.stdout.flush()),
+            speakers=new_classifier() if new_classifier else None,  # speakers are per recording
         )
 
     def on_start(rec: sa.Recording) -> None:
@@ -285,6 +310,7 @@ def handle_mixed(args):
         raise SystemExit(f"System audio unavailable: {err}")
 
     engine = load_engine(args)
+    new_classifier = speaker_factory(args, engine.sampling_rate) if args.speakers else None
     session = MixedSession(
         engine,
         me_label=args.me,
@@ -293,6 +319,7 @@ def handle_mixed(args):
         tag_format=args.tag_format or "block",
         echo_gate=EchoGate(engine.sampling_rate) if args.echo_guard else None,
         on_token=lambda t: (sys.stdout.write(t), sys.stdout.flush()),
+        speakers=new_classifier() if new_classifier else None,
         language=args.language,
         lookahead=args.lookahead,
         skip_special_tokens=not args.keep_tag,
@@ -301,7 +328,7 @@ def handle_mixed(args):
                              system_device=args.system_source, sample_rate=engine.sampling_rate)
 
     console.print(f"[bold]Mic:[/bold] [cyan]{args.mic_source}[/cyan] → [{args.me}]  "
-                  f"[bold]System:[/bold] [cyan]{args.system_source}[/cyan] → [{args.remote}]  "
+                  f"[bold]System:[/bold] [cyan]{args.system_source}[/cyan] → {"[Speaker N]" if args.speakers else f"[{args.remote}]"}  "
                   f"[bold]Echo guard:[/bold] {'on' if args.echo_guard else 'off'}")
     console.print("[bold green]Listening... press Ctrl+C to stop.[/bold green]\n")
     capture.start()
@@ -353,18 +380,12 @@ def handle_speakers(args):
     """Live speaker classification only (no ASR): who is speaking, turn by turn."""
     from transformers.audio_utils import load_audio
 
-    from spek.speakers import LiveSpeakerPreview, SpeakerClassifier, SpeakerEmbedder, VadSegmenter
+    from spek.speakers import LiveSpeakerPreview
+    from spek.vad import VadSegmenter
 
     sr = 16000
-    with console.status("[bold green]Loading VAD and speaker-embedding models..."):
-        vad = VadSegmenter(sr, min_silence=args.min_silence)
-        classifier = SpeakerClassifier(
-            SpeakerEmbedder(), threshold=args.speaker_threshold, max_speakers=args.num_speakers or 0
-        )
-        for name, path in parse_enroll(args.enroll).items():
-            classifier.enroll(name, load_audio(path, sampling_rate=sr))
-    if classifier.speakers:
-        console.print(f"[bold]Enrolled:[/bold] {', '.join(s.label for s in classifier.speakers)}")
+    vad = VadSegmenter(sr, min_silence=args.min_silence)
+    classifier = speaker_factory(args, sr)()
     preview = LiveSpeakerPreview(classifier, vad)
 
     def report(utts, status=None) -> None:
@@ -443,6 +464,11 @@ def build_parser() -> argparse.ArgumentParser:
                                    help="Known person's voice sample; repeatable")
     live_speaker_opts.add_argument("--speaker-threshold", type=float, default=get_speaker_threshold(),
                                    help="Cosine similarity to match a known speaker (default: %(default)s)")
+    live_speaker_opts.add_argument("--num-speakers", type=int, default=None, help="Max speakers to discover")
+
+    diarize_opts = argparse.ArgumentParser(add_help=False, parents=[live_speaker_opts])
+    diarize_opts.add_argument("--speakers", action="store_true",
+                              help="Label who is speaking: split each utterance into speaker turns, then transcribe")
 
     parser = argparse.ArgumentParser(prog="spek", description="Spek - model-agnostic ASR and streaming engine")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -462,10 +488,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("audio")
     p.add_argument("--simulate-realtime", action="store_true", help="Pace input like live audio")
 
-    add("mic", handle_mic, "Live microphone transcription", [engine_opts, asr_opts, lookahead_opts])
+    add("mic", handle_mic, "Live microphone transcription", [engine_opts, asr_opts, lookahead_opts, diarize_opts])
 
     p = add("listen", handle_listen, "Auto-transcribe system audio (calls, videos) on Linux",
-            [engine_opts, asr_opts, lookahead_opts])
+            [engine_opts, asr_opts, lookahead_opts, diarize_opts])
     p.add_argument("--app", action="append", metavar="NAME",
                    help="Only react to these apps (substring of name/binary, e.g. discord, firefox); repeatable")
     p.add_argument("--mic", choices=["auto", "on", "off"], default="auto",
@@ -477,9 +503,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--list", action="store_true", help="Show playback streams and capture sources, then exit")
 
     p = add("mixed", handle_mixed, "Mic + system audio as separate channels: you vs. remote speakers (Linux)",
-            [engine_opts, asr_opts, lookahead_opts, speaker_opts])
+            [engine_opts, asr_opts, lookahead_opts, speaker_opts, diarize_opts])
     p.add_argument("--me", default="You", help="Label for the microphone channel (default: %(default)s)")
-    p.add_argument("--remote", default="Remote", help="Label for the system audio channel (default: %(default)s)")
+    p.add_argument("--remote", default="Remote",
+                   help="Label for the system audio channel (default: %(default)s; --speakers labels each remote voice)")
     p.add_argument("--mic-source", default="@DEFAULT_SOURCE@", help="Microphone source (see `spek listen --list`)")
     p.add_argument("--system-source", default="@DEFAULT_MONITOR@", help="System audio source (a sink monitor)")
     p.add_argument("--echo-guard", action=argparse.BooleanOptionalAction, default=True,
@@ -489,7 +516,6 @@ def build_parser() -> argparse.ArgumentParser:
     p = add("speakers", handle_speakers, "Live speaker classification from mic (or a file)",
             [live_speaker_opts])
     p.add_argument("audio", nargs="?", help="Classify a file instead of the microphone")
-    p.add_argument("--num-speakers", type=int, default=None, help="Max speakers to discover")
     p.add_argument("--min-silence", type=float, default=0.4, help="Silence (s) that ends an utterance")
 
     p = add("benchmark", handle_benchmark, "Benchmark streaming latency presets", [engine_opts])

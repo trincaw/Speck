@@ -24,10 +24,12 @@ cp .env.example .env   # pick SPEK_MODEL, add keys
 uv run spek transcribe samples/bcn_weather.mp3            # offline
 uv run spek stream samples/obama.mp3 --lookahead 6        # streaming
 uv run spek mic --language en-US                          # live mic
+uv run spek mic --speakers --enroll Alice=alice.wav       # live mic, speaker-labelled text
 uv run spek listen                                        # auto-transcribe calls/videos (Linux)
 uv run spek listen --app discord --save-dir ~/transcripts # only Discord, save each call
 uv run spek listen --list                                 # show playing apps and capture sources
 uv run spek mixed --save call.txt                         # mic + system audio: [You] vs. [Remote]
+uv run spek mixed --speakers                              # [You] vs. [Speaker 0], [Speaker 1]...
 uv run spek speakers                                      # live "who is speaking"
 uv run spek speakers --enroll Alice=alice.wav --enroll Bob=bob.wav
 uv run spek serve --port 8000                             # web UI + API
@@ -40,6 +42,24 @@ window over each one to catch hand-overs without a pause, and matches every turn
 people or speakers discovered on the fly (duplicates are merged as their voices converge). While
 someone is still talking a provisional label is shown (`spek speakers`). Tune with `--speaker-threshold` (or
 `SPEK_SPEAKER_THRESHOLD`, default 0.35) and cap with `--num-speakers`.
+
+### Speaker-labelled transcripts (any engine)
+
+`--speakers` on `mic` / `listen` / `mixed` (or `"speakers": true` in the WebSocket config, or
+`engine.create_stream_session(speakers=SpeakerClassifier(SpeakerEmbedder()))`) runs:
+
+| Stage | Input | Output |
+|---|---|---|
+| VAD | audio stream | utterances (start/end) |
+| Speaker turns | utterance | single-speaker turns + label |
+| ASR | each turn | text |
+
+Speaker turns are found *before* ASR, so each turn's text gets that turn's label. No ASR timestamps
+and no merge step are needed, so it works with any engine that implements `transcribe()`. Text
+appears about 1 s after a turn ends. The WebSocket also sends `speaker` events (provisional label
+while someone is talking) and `segment` events. When two discovered speakers turn out to be the same
+person, `session.segments` / `session.transcript` (and the final `done` message) use the merged
+label for all their turns.
 
 ### System audio (Linux)
 
@@ -55,7 +75,8 @@ meters are ignored. Use `--source NAME` to record one source continuously instea
 `spek mixed` records the microphone and system audio as two separate channels and merges them
 into one transcript. The channel itself says who is talking: the mic is `[You]` (`--me NAME`),
 and system audio is tagged `[Remote]` (`--remote NAME`).
-`--no-tag-speakers` gives plain merged text. Without headphones the mic hears the speakers too,
+With `--speakers`, each remote voice gets its own label instead: an enrolled name (`--enroll`)
+or `Speaker N`, numbered in order of appearance. `--no-tag-speakers` gives plain merged text. Without headphones the mic hears the speakers too,
 so `--echo-guard` (default on) mutes mic audio whose loudness follows what is playing; turn it
 off with headphones. Pick devices with `--mic-source` / `--system-source` (`spek listen --list`).
 

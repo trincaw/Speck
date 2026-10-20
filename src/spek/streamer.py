@@ -14,7 +14,8 @@ from spek.utils import to_mono_float32
 
 if TYPE_CHECKING:
     from spek.base import BaseASREngine
-    from spek.speakers import Utterance
+    from spek.speakers import SpeakerClassifier, SpeakerMatch
+    from spek.vad import Utterance
 
 logger = logging.getLogger(__name__)
 
@@ -190,7 +191,7 @@ class UtteranceStreamSession(BaseAudioStreamSession):
 
     def __init__(self, *args, vad_min_silence: float = 0.4, vad_max_speech: float = 15.0, **kwargs):
         super().__init__(*args, **kwargs)
-        from spek.speakers import VadSegmenter
+        from spek.vad import VadSegmenter
         self._vad = VadSegmenter(self.sr, min_silence=vad_min_silence, max_speech=vad_max_speech)
 
     def _run_inference_worker(self) -> None:
@@ -218,6 +219,97 @@ class UtteranceStreamSession(BaseAudioStreamSession):
             utt.samples, language=self.language, skip_special_tokens=self.skip_special_tokens
         ).text.strip()
         return f" {text}" if text and self._transcript else text
+
+
+class SpeakerStreamSession(UtteranceStreamSession):
+    """Speaker-labelled live transcript from any engine: VAD → speaker turns → ASR per turn.
+
+    Each finished utterance is first split where the voice changes (`SpeakerClassifier.segment`),
+    then every single-speaker turn is transcribed on its own. Labels come from the audio
+    itself, so no ASR timestamps are needed and any engine with `transcribe()` works.
+
+    - `on_token` gets tagged text as turns finish (a tag whenever the speaker changes).
+    - `on_segment` gets each turn as a dict (speaker, start, end, text, score, confident).
+    - `on_speaker` gets a provisional `SpeakerMatch` while someone is still talking.
+    - `segments` / `transcript` follow later speaker merges, so they are the corrected view.
+    """
+
+    def __init__(
+        self,
+        *args,
+        speakers: SpeakerClassifier,
+        tag_format: str = "block",
+        on_segment: Optional[Callable[[dict], None]] = None,
+        on_speaker: Optional[Callable[[SpeakerMatch], None]] = None,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        from spek.mixed import TranscriptMixer
+        from spek.speakers import LiveSpeakerPreview
+
+        if speakers.embedder.sample_rate != self.sr:
+            raise ValueError(f"Speaker embedder runs at {speakers.embedder.sample_rate} Hz, engine at {self.sr} Hz")
+        self.classifier = speakers
+        self.tag_format = tag_format
+        self.on_segment = on_segment
+        self.on_speaker = on_speaker
+        self._mixer = TranscriptMixer(tag_format=tag_format, on_token=self._emit_token)
+        self._preview = LiveSpeakerPreview(speakers, self._vad) if on_speaker else None
+        self._turns: list[dict] = []
+
+    def _on_audio(self) -> None:
+        if self._preview and (match := self._preview.update()):
+            self._notify(self.on_speaker, match)
+
+    def _handle(self, utt: Utterance) -> None:
+        try:
+            turns = self.classifier.segment(utt.samples)
+        except Exception as err:
+            logger.warning("Speaker segmentation at %.2fs failed: %s", utt.start, err)
+            return
+        for turn in turns:
+            piece = utt.samples[int(turn.start * self.sr) : int(turn.end * self.sr)]
+            try:
+                text = self.engine.transcribe(
+                    piece, language=self.language, skip_special_tokens=self.skip_special_tokens
+                ).text.strip()
+            except Exception as err:
+                logger.warning("Turn at %.2fs failed: %s", utt.start + turn.start, err)
+                continue
+            if not text:
+                continue
+            seg = {
+                "speaker": turn.match.label,
+                "start": round(utt.start + turn.start, 2),
+                "end": round(utt.start + turn.end, 2),
+                "text": text,
+                "score": round(turn.match.score, 3),
+                "confident": turn.match.confident,
+            }
+            self._turns.append(seg)
+            self._mixer.emit(seg["speaker"], text, whole=True)
+            self._notify(self.on_segment, dict(seg))
+
+    def _notify(self, callback: Optional[Callable], value) -> None:
+        if callback:
+            try:
+                callback(value)
+            except Exception as err:
+                logger.error("Error in speaker callback: %s", err)
+
+    @property
+    def segments(self) -> list[dict]:
+        """Every turn so far, with labels of merged speakers resolved."""
+        return [{**s, "speaker": self.classifier.resolve(s["speaker"])} for s in list(self._turns)]
+
+    @property
+    def transcript(self) -> str:
+        from spek.mixed import TranscriptMixer
+
+        mixer = TranscriptMixer(tag_format=self.tag_format)
+        for s in self.segments:
+            mixer.emit(s["speaker"], s["text"], whole=True)
+        return mixer.transcript
 
 
 def LiveAudioStreamSession(engine: BaseASREngine, **kwargs) -> BaseAudioStreamSession:

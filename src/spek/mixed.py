@@ -6,18 +6,22 @@ is talking: the microphone is you, system audio is everyone else.
 - `TranscriptMixer` interleaves labelled text from several live sessions.
 - `EchoGate` mutes microphone audio that is only the speakers' sound picked up again
   (laptop speakers, no headphones), so remote speech isn't transcribed twice.
-- `MixedSession` wires one engine into a mic session and a system-audio session.
+- `MixedSession` wires one engine into a mic session and a system-audio session; with a
+  `SpeakerClassifier`, remote audio is further split into "Speaker N" / enrolled names.
 """
 
 from __future__ import annotations
 
 import logging
 import threading
-from typing import Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 import numpy as np
 
 from spek.utils import to_mono_float32
+
+if TYPE_CHECKING:
+    from spek.speakers import SpeakerClassifier
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +150,8 @@ class MixedSession:
     """Live transcription of the microphone ("you") and system audio ("them") together.
 
     Feed `push_mic()` / `push_system()` from any capture (they may run on different
-    threads). System audio is tagged `remote_label`.
+    threads). System audio is tagged `remote_label`, or with `speakers` each remote voice
+    gets its own label (enrolled name, else "Speaker N" numbered as new voices appear).
     """
 
     def __init__(
@@ -158,18 +163,29 @@ class MixedSession:
         tag_format: str = "block",
         echo_gate: Optional[EchoGate] = None,
         on_token: Optional[Callable[[str], None]] = None,
+        speakers: Optional[SpeakerClassifier] = None,
         **session_kwargs: Any,
     ):
         self.me_label, self.remote_label = me_label, remote_label
         self.mixer = TranscriptMixer(tag=tag_speakers, tag_format=tag_format, on_token=on_token)
         self.echo_gate = echo_gate
+        self.speakers = speakers
 
         self.mic = engine.create_stream_session(
             on_token=lambda t: self.mixer.emit(me_label, t, channel="mic"), **session_kwargs
         )
-        self.system = engine.create_stream_session(
-            on_token=lambda t: self.mixer.emit(remote_label, t, channel="system"), **session_kwargs
-        )
+        if speakers is None:
+            self.system = engine.create_stream_session(
+                on_token=lambda t: self.mixer.emit(remote_label, t, channel="system"), **session_kwargs
+            )
+        else:
+            self.system = engine.create_stream_session(
+                speakers=speakers,
+                on_segment=lambda seg: self.mixer.emit(
+                    seg["speaker"], seg["text"], whole=True, channel="system", start=seg["start"], end=seg["end"]
+                ),
+                **session_kwargs,
+            )
 
     @property
     def sessions(self) -> tuple:
@@ -201,8 +217,20 @@ class MixedSession:
 
     @property
     def transcript(self) -> str:
-        return self.mixer.transcript
+        if self.speakers is None:
+            return self.mixer.transcript
+        mixer = TranscriptMixer(tag=self.mixer.tag, tag_format=self.mixer.tag_format)
+        for seg in self.segments:  # re-render so merged remote speakers share one label
+            mixer.emit(seg["speaker"], seg["text"], whole=True)
+        return mixer.transcript
 
     @property
     def segments(self) -> list[dict[str, Any]]:
-        return self.mixer.segments
+        """Channel turns; remote speakers that were merged later carry their final label."""
+        with self.mixer._lock:
+            segments = [dict(seg) for seg in self.mixer.segments]
+        if self.speakers is not None:
+            for seg in segments:
+                if seg["channel"] == "system":
+                    seg["speaker"] = self.speakers.resolve(seg["speaker"])
+        return segments

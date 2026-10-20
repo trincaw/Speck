@@ -13,6 +13,7 @@ import torch
 from spek.utils import to_mono_float32
 
 if TYPE_CHECKING:
+    from spek.speakers import SpeakerClassifier
     from spek.streamer import BaseAudioStreamSession
 
 AudioInput = Union[str, np.ndarray, torch.Tensor]
@@ -126,11 +127,18 @@ class BaseASREngine(ABC):
         lookahead: int = 6,
         skip_special_tokens: bool = True,
         on_token: Optional[Callable[[str], None]] = None,
+        speakers: Optional[SpeakerClassifier] = None,
         **kwargs: Any,
     ) -> BaseAudioStreamSession:
-        """Create a live push-based session. Default: VAD-segmented utterances sent to `transcribe`."""
-        from spek.streamer import UtteranceStreamSession
-        return UtteranceStreamSession(
+        """Create a live push-based session. Default: VAD-segmented utterances sent to `transcribe`.
+
+        With `speakers`, every utterance is split into single-speaker turns first and the
+        output is speaker-labelled (`SpeakerStreamSession`), whatever the engine.
+        """
+        from spek.streamer import SpeakerStreamSession, UtteranceStreamSession
+        if speakers is not None:
+            kwargs["speakers"] = speakers
+        return (SpeakerStreamSession if speakers is not None else UtteranceStreamSession)(
             engine=self,
             language=language,
             lookahead=lookahead,

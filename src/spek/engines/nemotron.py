@@ -186,8 +186,11 @@ class NemotronASR(BaseASREngine):
 
         yield from self.stream_tokens(read, language, lookahead, skip_special_tokens)
 
-    def create_stream_session(self, **kwargs: Any) -> NemotronLiveStreamSession:
+    def create_stream_session(self, **kwargs: Any) -> BaseAudioStreamSession:
         self._ensure_loaded()
+        if kwargs.get("speakers") is not None:  # speaker turns need utterance-level decoding
+            return super().create_stream_session(**kwargs)
+        kwargs.pop("speakers", None)
         return NemotronLiveStreamSession(engine=self, **kwargs)
 
 

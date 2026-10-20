@@ -48,6 +48,8 @@ class VadSegmenter:
         self._window = cfg.silero_vad.window_size
         self._vad = sherpa_onnx.VoiceActivityDetector(cfg, buffer_size_in_seconds=max_speech + 5)
         self._pending = np.zeros(0, dtype=np.float32)
+        self._live: list[np.ndarray] = []  # windows of the utterance in progress
+        self._max_live = int((max_speech + 1) * sample_rate / self._window)
 
     def accept(self, samples: np.ndarray) -> list[Utterance]:
         buf = np.concatenate([self._pending, samples]) if len(self._pending) else samples
@@ -55,6 +57,12 @@ class VadSegmenter:
         for i in range(0, n, self._window):
             window = buf[i : i + self._window]
             self._vad.accept_waveform(window)
+            if self._vad.is_speech_detected():
+                self._live.append(window)
+                if len(self._live) > self._max_live:
+                    del self._live[0]
+            else:
+                self._live.clear()
         self._pending = buf[n:].copy()
         return self._drain()
 
@@ -63,7 +71,22 @@ class VadSegmenter:
             self._vad.accept_waveform(np.pad(self._pending, (0, self._window - len(self._pending))))
             self._pending = np.zeros(0, dtype=np.float32)
         self._vad.flush()
+        self._live.clear()
         return self._drain()
+
+    @property
+    def is_speech(self) -> bool:
+        return self._vad.is_speech_detected()
+
+    @property
+    def live_seconds(self) -> float:
+        """Duration of the utterance still in progress (0 when silent)."""
+        return len(self._live) * self._window / self.sample_rate
+
+    def live_audio(self, seconds: Optional[float] = None) -> np.ndarray:
+        """The most recent `seconds` of the utterance still in progress."""
+        windows = self._live if seconds is None else self._live[-max(1, int(seconds * self.sample_rate / self._window)) :]
+        return np.concatenate(windows) if windows else np.zeros(0, dtype=np.float32)
 
     def _drain(self) -> list[Utterance]:
         out = []

@@ -127,3 +127,29 @@ def test_mixed_session_tags_you_and_remote():
     by_channel = {s["channel"]: s["speaker"] for s in session.segments}
     assert by_channel == {"mic": "You", "system": "Remote"}
     assert "[You]: " in session.transcript and "[Remote]: " in session.transcript
+
+
+def test_mixed_session_labels_each_remote_voice():
+    """With a classifier, mic stays "You" and each remote voice gets its own Speaker N."""
+    from test_live import _StubASR, _two_voices
+
+    from spek.speakers import SpeakerClassifier, SpeakerEmbedder
+
+    remote, _ = _two_voices(gap=1.0)
+    mic = np.concatenate([np.zeros(len(remote), np.float32), _voice("samples/sample1.flac", 6, 4), np.zeros(SR, np.float32)])
+    remote = np.pad(remote, (0, len(mic) - len(remote)))
+    out = []
+    session = MixedSession(_StubASR("stub", device="cpu"), speakers=SpeakerClassifier(SpeakerEmbedder()), on_token=out.append)
+    session.start()
+    for i in range(0, len(mic), SR // 10):
+        session.push_system(remote[i : i + SR // 10])
+        session.push_mic(mic[i : i + SR // 10])
+    session.finish()
+    assert session.join(timeout=60)
+
+    # Audio is pushed faster than real time, so the channels' relative order is not checked
+    by_channel = lambda ch: [s["speaker"] for s in session.segments if s["channel"] == ch]
+    assert by_channel("system") == ["Speaker 0", "Speaker 1"]
+    assert by_channel("mic") == ["You"]
+    assert all(f"[{label}]: " in session.transcript for label in ("Speaker 0", "Speaker 1", "You"))
+    assert "".join(out).strip() == session.transcript

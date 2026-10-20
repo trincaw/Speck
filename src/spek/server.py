@@ -51,6 +51,23 @@ def set_engine(engine: BaseASREngine) -> None:
         _engine = engine
 
 
+@lru_cache(maxsize=1)
+def _speaker_embedder(sample_rate: int):
+    from spek.speakers import SpeakerEmbedder
+    return SpeakerEmbedder(sample_rate=sample_rate)  # thread-safe, shared by all sessions
+
+
+def _speaker_classifier(config: dict[str, Any], sample_rate: int):
+    """Fresh per-connection classifier (speaker identities are not shared between streams)."""
+    from spek.config import get_speaker_threshold
+    from spek.speakers import SpeakerClassifier
+    return SpeakerClassifier(
+        _speaker_embedder(sample_rate),
+        threshold=float(config.get("speaker_threshold", get_speaker_threshold())),
+        max_speakers=int(config.get("num_speakers", 0)),
+    )
+
+
 @lru_cache(maxsize=8)
 def _render_ui(engine: BaseASREngine) -> str:
     def option(value: Any, label: str, selected: bool = False) -> str:
@@ -142,7 +159,10 @@ async def transcribe_file(
 async def websocket_stream(websocket: WebSocket):
     """Live streaming: first a JSON config message, then float32 16 kHz PCM frames, then {"type": "eof"}.
 
-    Server messages: {"type": "token"} and finally {"type": "done"}.
+    Server messages: {"type": "token"} and finally {"type": "done"}. With `"speakers": true`
+    in the config, text is speaker-tagged and the server also sends {"type": "segment"} per
+    finished turn and {"type": "speaker"} (provisional label while someone is talking);
+    "done" then carries the corrected `segments`.
     """
     await websocket.accept()
     engine = get_engine()
@@ -154,12 +174,20 @@ async def websocket_stream(websocket: WebSocket):
 
     try:
         config = json.loads(await websocket.receive_text())
+        speaker_opts: dict[str, Any] = {}
+        if config.get("speakers"):
+            speaker_opts = {
+                "speakers": await run_in_threadpool(_speaker_classifier, config, engine.sampling_rate),
+                "on_segment": lambda seg: send({"type": "segment", **seg}),
+                "on_speaker": lambda m: send({"type": "speaker", "label": m.label, "score": round(m.score, 3)}),
+            }
         session = await run_in_threadpool(
             engine.create_stream_session,
             language=config.get("language", "auto"),
             lookahead=int(config.get("lookahead", 6)),
             skip_special_tokens=bool(config.get("skip_special_tokens", True)),
             on_token=lambda token: send({"type": "token", "text": token}),
+            **speaker_opts,
         )
         session.start()
 
@@ -174,7 +202,10 @@ async def websocket_stream(websocket: WebSocket):
 
         session.finish()
         await asyncio.to_thread(session.join, 30.0)  # wait for trailing tokens
-        await websocket.send_json({"type": "done", "transcript": session.transcript})
+        done = {"type": "done", "transcript": session.transcript}
+        if speaker_opts:
+            done["segments"] = session.segments
+        await websocket.send_json(done)
 
     except WebSocketDisconnect:
         logger.info("WebSocket client disconnected.")

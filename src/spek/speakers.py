@@ -1,4 +1,4 @@
-"""Voice activity detection and online speaker classification (sherpa-onnx).
+"""Online speaker classification (sherpa-onnx speaker embeddings).
 
 Used for live streams: the VAD cuts audio into utterances, each utterance is scanned for
 speaker changes and every resulting turn is embedded and matched against known speakers
@@ -16,100 +16,14 @@ from typing import Optional
 import numpy as np
 
 from spek.utils import resolve_hf_file, to_mono_float32
+from spek.vad import Utterance, VadSegmenter  # noqa: F401  (re-exported)
 
 logger = logging.getLogger(__name__)
-
-VAD_REPO = "csukuangfj/vad"
-VAD_FILE = "silero_vad.onnx"
 
 EMBEDDING_REPO = "csukuangfj/speaker-embedding-models"
 # TitaNet keeps a stable similarity scale across utterance lengths (CAM++ swings from
 # 0.2 to 0.8 between 1.5 s and 3 s clips), which a single online threshold depends on.
 EMBEDDING_FILE = "nemo_en_titanet_small.onnx"
-
-
-@dataclass
-class Utterance:
-    start: float  # seconds from stream start
-    samples: np.ndarray
-
-
-class VadSegmenter:
-    """Incremental Silero VAD: feed arbitrary-size chunks, get back finished utterances."""
-
-    def __init__(
-        self,
-        sample_rate: int = 16000,
-        threshold: float = 0.5,
-        min_silence: float = 0.4,
-        min_speech: float = 0.25,
-        max_speech: float = 15.0,
-        model: Optional[str] = None,
-        provider: str = "cpu",
-    ):
-        import sherpa_onnx
-
-        cfg = sherpa_onnx.VadModelConfig()
-        cfg.silero_vad.model = resolve_hf_file(model, VAD_REPO, VAD_FILE)
-        cfg.silero_vad.threshold = threshold
-        cfg.silero_vad.min_silence_duration = min_silence
-        cfg.silero_vad.min_speech_duration = min_speech
-        cfg.silero_vad.max_speech_duration = max_speech
-        cfg.sample_rate = sample_rate
-        cfg.num_threads = 1
-        cfg.provider = provider
-
-        self.sample_rate = sample_rate
-        self._window = cfg.silero_vad.window_size
-        self._vad = sherpa_onnx.VoiceActivityDetector(cfg, buffer_size_in_seconds=max_speech + 5)
-        self._pending = np.zeros(0, dtype=np.float32)
-        self._live: list[np.ndarray] = []  # windows of the utterance in progress
-        self._max_live = int((max_speech + 1) * sample_rate / self._window)
-
-    def accept(self, samples: np.ndarray) -> list[Utterance]:
-        buf = np.concatenate([self._pending, samples]) if len(self._pending) else samples
-        n = len(buf) - len(buf) % self._window
-        for i in range(0, n, self._window):
-            window = buf[i : i + self._window]
-            self._vad.accept_waveform(window)
-            if self._vad.is_speech_detected():
-                self._live.append(window)
-                if len(self._live) > self._max_live:
-                    del self._live[0]
-            else:
-                self._live.clear()
-        self._pending = buf[n:].copy()
-        return self._drain()
-
-    def flush(self) -> list[Utterance]:
-        if len(self._pending):
-            self._vad.accept_waveform(np.pad(self._pending, (0, self._window - len(self._pending))))
-            self._pending = np.zeros(0, dtype=np.float32)
-        self._vad.flush()
-        self._live.clear()
-        return self._drain()
-
-    @property
-    def is_speech(self) -> bool:
-        return self._vad.is_speech_detected()
-
-    @property
-    def live_seconds(self) -> float:
-        """Duration of the utterance still in progress (0 when silent)."""
-        return len(self._live) * self._window / self.sample_rate
-
-    def live_audio(self, seconds: Optional[float] = None) -> np.ndarray:
-        """The most recent `seconds` of the utterance still in progress."""
-        windows = self._live if seconds is None else self._live[-max(1, int(seconds * self.sample_rate / self._window)) :]
-        return np.concatenate(windows) if windows else np.zeros(0, dtype=np.float32)
-
-    def _drain(self) -> list[Utterance]:
-        out = []
-        while not self._vad.empty():
-            seg = self._vad.front
-            out.append(Utterance(start=seg.start / self.sample_rate, samples=np.asarray(seg.samples, dtype=np.float32)))
-            self._vad.pop()
-        return out
 
 
 class SpeakerEmbedder:
@@ -262,7 +176,7 @@ class SpeakerClassifier:
             b = boundary[i]
             if min(b, len(samples) - b) >= min_turn and all(abs(b - c) >= min_turn for c in cuts):
                 cuts.append(b)
-        cuts.sort()
+        cuts = sorted(self._snap_to_pause(samples, c) for c in cuts)
 
         # Confirm on whole turns, which embed far more reliably than single windows
         while cuts:
@@ -274,6 +188,18 @@ class SpeakerClassifier:
                 break
             del cuts[i]
         return cuts
+
+    def _snap_to_pause(self, samples: np.ndarray, cut: int) -> int:
+        """Move a cut to the quietest 20 ms frame within half a hop, so turns sent to ASR
+        rarely start or end mid-word."""
+        sr = self.embedder.sample_rate
+        frame, radius = sr // 50, int(self.change_hop * sr / 2)
+        lo = max(0, cut - radius)
+        n = (min(len(samples), cut + radius) - lo) // frame
+        if n < 2:
+            return cut
+        energy = np.square(samples[lo : lo + n * frame].reshape(n, frame)).mean(axis=1)
+        return lo + int(np.argmin(energy)) * frame + frame // 2
 
     def _best(self, emb: np.ndarray) -> tuple[Optional[_Speaker], float, float]:
         """(best speaker, raw cosine, cosine incl. continuity bonus)."""

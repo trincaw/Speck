@@ -3,8 +3,9 @@
 import numpy as np
 from transformers.audio_utils import load_audio
 
+from spek.base import BaseASREngine, TranscriptionResult
 from spek.speakers import LiveSpeakerPreview, SpeakerClassifier, SpeakerEmbedder, VadSegmenter
-from spek.streamer import AudioBuffer
+from spek.streamer import AudioBuffer, SpeakerStreamSession
 
 
 def test_audio_buffer_absolute_indexing_and_discard():
@@ -132,3 +133,58 @@ def test_live_preview_labels_speech_in_progress():
     assert live and all(lbl == "?" for t, lbl in live if t < 3.0)
     assert {lbl for t, lbl in live if 4.5 < t < 6.0} == {"Speaker 0"}
     assert {lbl for t, lbl in live if t > 8.0} == {"?"}
+
+
+class _StubASR(BaseASREngine):
+    """Any engine works: the speaker session only needs `transcribe()`."""
+
+    name, sampling_rate = "Stub", 16000
+
+    def load(self):
+        return self
+
+    def transcribe(self, audio, language="auto", skip_special_tokens=True, **kwargs):
+        secs = len(audio) / self.sampling_rate
+        return TranscriptionResult(f"{secs:.1f}s", "", None, secs, 0.0, 0.0)
+
+    def stream_transcribe(self, audio, **kwargs):
+        yield self.transcribe(audio).text
+
+
+def test_speaker_session_labels_text_from_any_engine():
+    audio, sr = _two_voices(gap=1.0)
+    clf = SpeakerClassifier(SpeakerEmbedder())
+    segments, live, tokens = [], [], []
+    session = _StubASR("stub", device="cpu").create_stream_session(
+        speakers=clf, on_token=tokens.append, on_segment=segments.append, on_speaker=live.append
+    )
+    assert isinstance(session, SpeakerStreamSession)
+    session.start()
+    for i in range(0, len(audio), 1600):
+        session.push_audio(audio[i : i + 1600])
+    session.finish()
+    assert session.join(timeout=60)
+
+    labels = [s["speaker"] for s in segments]
+    assert [a for a, b in zip(labels, [None, *labels]) if a != b] == ["Speaker 0", "Speaker 1"]
+    assert all(a["end"] <= b["start"] for a, b in zip(segments, segments[1:]))
+    assert live and all(m.label in ("?", "Speaker 0", "Speaker 1") for m in live)
+    assert session.transcript.startswith("[Speaker 0]: ") and "\n[Speaker 1]: " in session.transcript
+    assert "".join(tokens).strip() == session.transcript
+
+    # Merged speakers are resolved retroactively in segments and transcript
+    clf.aliases["Speaker 1"] = "Speaker 0"
+    assert {s["speaker"] for s in session.segments} == {"Speaker 0"}
+    assert "Speaker 1" not in session.transcript
+
+
+def test_unknown_voices_get_incremental_speaker_numbers_next_to_enrolled():
+    clf = SpeakerClassifier(_FakeEmbedder(), threshold=0.9)
+    clf.enroll("Alice", np.r_[1, 0, 0, 0].astype(np.float32))
+    pad = np.zeros(32000)
+    voice = lambda *v: np.r_[v, pad].astype(np.float32)
+    assert clf.classify(voice(1, 0, 0, 0)).label == "Alice"
+    assert clf.classify(voice(0, 1, 0, 0)).label == "Speaker 0"
+    assert clf.classify(voice(0, 0, 1, 0)).label == "Speaker 1"
+    assert clf.classify(voice(0, 1, 0, 0)).label == "Speaker 0"
+    assert clf.classify(voice(0, 0, 0, 1)).label == "Speaker 2"
