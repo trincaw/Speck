@@ -16,7 +16,6 @@ def _find_env_file() -> Optional[Path]:
     candidates = [
         os.environ.get("SPEK_ENV_FILE"),
         Path.cwd() / ".env",
-        Path(__file__).resolve().parents[2] / ".env",
     ]
     for candidate in candidates:
         if candidate and Path(candidate).is_file():
@@ -36,7 +35,7 @@ def load_env_file(filepath: Optional[str | Path] = None, override: bool = False)
     """Parse KEY=VALUE pairs from a .env file into os.environ.
 
     Args:
-        filepath: Path to a .env file; searches SPEK_ENV_FILE, CWD and project root if None.
+        filepath: Path to a .env file; searches SPEK_ENV_FILE and CWD if None.
         override: Overwrite variables already present in os.environ.
     """
     path = Path(filepath) if filepath else _find_env_file()
@@ -61,8 +60,6 @@ def load_env_file(filepath: Optional[str | Path] = None, override: bool = False)
         logger.warning("Could not read .env file at %s: %s", path, exc)
     return loaded
 
-
-load_env_file()
 
 
 def env(*keys: str, default: T = None, cast: Callable[[str], T] = str) -> T:

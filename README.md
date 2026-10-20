@@ -11,14 +11,25 @@ Model-agnostic speech recognition with real-time streaming and live speaker clas
 | NVIDIA Nemotron 3.5 (0.6B) | `nemotron` | Local, cache-aware streaming, 80–1120 ms latency |
 | Mistral Voxtral Mini Transcribe 2 | `voxtral` | Cloud API (`MISTRAL_API_KEY`) or local weights |
 
-## Setup
+## Install
+
+Spek is a library first. The core install has no CLI or web-server dependencies:
 
 ```bash
-uv sync
-cp .env.example .env   # pick SPEK_MODEL, add keys
+pip install spek                # library only
+pip install "spek[audio]"       # + sounddevice, for mic capture in your own code
+pip install "spek[cli]"         # + the `spek` command (rich, sounddevice)
+pip install "spek[server]"      # + web UI / REST / WebSocket server (fastapi, uvicorn)
+pip install "spek[all]"         # everything
 ```
 
-## CLI
+Configuration is read from environment variables (`SPEK_MODEL`, `SPEK_DEVICE`, `MISTRAL_API_KEY`...).
+Importing `spek` does not touch the environment; call `spek.load_env_file()` yourself to load a `.env`
+(the CLI and server do this automatically).
+
+Development: `uv sync` (installs every extra), `cp .env.example .env`.
+
+## CLI (`spek[cli]`)
 
 ```bash
 uv run spek transcribe samples/bcn_weather.mp3            # offline
@@ -93,7 +104,7 @@ session.push_audio(pcm_chunk)  # 16 kHz float32, from mic / socket
 session.finish(); session.join()
 ```
 
-## API
+## Server (`spek[server]`)
 
 - `GET /` – browser mic UI
 - `WS /ws/stream` – JSON config, then float32 PCM frames, then `{"type": "eof"}`

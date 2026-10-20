@@ -19,16 +19,20 @@ from fastapi import FastAPI, File, Form, UploadFile, WebSocket, WebSocketDisconn
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
 
+from spek import __version__
 from spek.base import BaseASREngine
+from spek.config import load_env_file
 from spek.factory import get_engine as create_engine, list_available_models
 from spek.streamer import BaseAudioStreamSession
+
+load_env_file()
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Spek ASR Streaming Server",
     description="Model-Agnostic Real-Time Speech Recognition API & Web UI",
-    version="0.2.0",
+    version=__version__,
 )
 
 _engine: Optional[BaseASREngine] = None

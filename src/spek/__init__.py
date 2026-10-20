@@ -1,5 +1,7 @@
 """Spek - Model-Agnostic ASR and Streaming Engine."""
 
+from importlib.metadata import PackageNotFoundError, version as _version
+
 from spek.asr import (
     BaseASREngine,
     BenchmarkResult,
@@ -35,4 +37,7 @@ __all__ = [
     "load_env_file",
 ]
 
-__version__ = "0.2.0"
+try:
+    __version__ = _version("spek")
+except PackageNotFoundError:  # running from a source tree without install
+    __version__ = "0+unknown"

@@ -14,7 +14,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from spek.base import BaseASREngine
-from spek.config import get_mistral_api_key, get_model_name, get_speaker_threshold
+from spek.config import get_mistral_api_key, get_model_name, get_speaker_threshold, load_env_file
 from spek.factory import get_engine, list_available_models
 
 console = Console()
@@ -530,6 +530,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    load_env_file()
     args = build_parser().parse_args()
     args.func(args)
 
