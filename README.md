@@ -78,3 +78,23 @@ Add your own engine by subclassing `BaseASREngine` and calling `speck.factory.re
 ```bash
 uv run pytest
 ```
+
+## Speaker Recognition Metrics Pipeline
+
+Speck includes an automated evaluation pipeline measuring **Equal Error Rate (EER)**, **NIST minDCF**, **AUC-ROC**, and **real-time streaming latency**:
+
+```bash
+# 1. Download models and benchmark audio WAV dataset
+python scripts/download_assets.py --all
+
+# 2. Run the metrics pipeline
+python main.py evaluate --data-dir data/ --output-dir reports/
+```
+
+Generated evaluation artifacts are stored in `reports/`:
+- `reports/EVALUATION_REPORT.md`: Comprehensive executive report with benchmark metrics and latency percentiles.
+- `reports/metrics_summary.json`: Machine-readable evaluation dump.
+- `reports/roc_curve.csv`: Coordinates for plotting ROC curves.
+
+For detailed instructions on obtaining WAV files, converting your own voice recordings, and downloading model weights, see [docs/data_and_models.md](docs/data_and_models.md).
+

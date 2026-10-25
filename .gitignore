@@ -5,11 +5,34 @@ build/
 dist/
 wheels/
 *.egg-info
+.pytest_cache/
+.ruff_cache/
 
 # Virtual environments
-.venv
-.pytest_cache/
+.venv/
+venv/
+env/
 
 # Environment files
 .env
 .env.local
+.env.*.local
+
+# Model weights & ONNX files (downloaded via scripts/download_assets.py)
+models/
+*.onnx
+*.pt
+*.bin
+*.safetensors
+
+# Audio datasets & benchmarks (downloaded via scripts/download_assets.py)
+data/
+*.wav
+
+# Evaluation reports & generated test artifacts
+reports/
+*.coverage
+htmlcov/
+
+# Preserve tracked sample files
+!samples/*
