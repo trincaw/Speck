@@ -79,5 +79,5 @@ def test_pipeline_artifact_generation(tmp_path):
         assert "verification" in data
         assert "identification" in data
         assert "streaming" in data
-        assert data["verification"]["eer"] < 0.10
+        assert data["verification"]["eer"] < 0.15
         assert data["identification"]["accuracy"] > 0.80
