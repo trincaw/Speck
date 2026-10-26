@@ -13,6 +13,7 @@ from speck.asr import (
 )
 from speck.config import load_env_file
 from speck.speakers import LiveSpeakerPreview, SpeakerClassifier, SpeakerEmbedder, SpeakerTurn
+from speck.pyannote import PyannoteSpeakerRecognizer
 from speck.vad import VadSegmenter
 from speck.streamer import LiveAudioStreamSession, SpeakerStreamSession
 from speck.utils import LOOKAHEAD_CONFIGS, SUPPORTED_LANGUAGES
@@ -27,6 +28,7 @@ __all__ = [
     "BenchmarkResult",
     "LiveAudioStreamSession",
     "LiveSpeakerPreview",
+    "PyannoteSpeakerRecognizer",
     "SpeakerClassifier",
     "SpeakerEmbedder",
     "SpeakerStreamSession",

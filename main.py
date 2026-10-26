@@ -4,7 +4,7 @@ import argparse
 import numpy as np
 import soundfile as sf
 
-from src.neural_recognizer import NeuralSpeakerRecognizer
+from speck.pyannote import PyannoteSpeakerRecognizer
 from src.streaming import RealTimeStreamingEngine
 
 def main():
@@ -20,6 +20,12 @@ def main():
     ident_parser = subparsers.add_parser("identify", help="Identify the speaker in an audio file")
     ident_parser.add_argument("audio_path", help="Path to query audio file")
     
+    # Diarize
+    diar_parser = subparsers.add_parser("diarize", help="Diarize speakers in an audio file")
+    diar_parser.add_argument("audio_path", help="Path to audio file")
+    diar_parser.add_argument("--num-speakers", type=int, default=-1, help="Expected number of speakers (-1 for auto)")
+    diar_parser.add_argument("--threshold", type=float, default=0.5, help="Clustering threshold (default: 0.5)")
+
     # Streaming Simulation
     stream_parser = subparsers.add_parser("stream", help="Simulate real-time streaming recognition on an audio file")
     stream_parser.add_argument("audio_path", help="Path to query audio stream")
@@ -38,7 +44,7 @@ def main():
         parser.print_help()
         return
 
-    recognizer = NeuralSpeakerRecognizer()
+    recognizer = PyannoteSpeakerRecognizer()
 
     # Pre-enroll demo speakers from data/ if available
     if os.path.exists("data"):
@@ -65,6 +71,16 @@ def main():
         best_spk = max(scores, key=scores.get) if scores else "None"
         print("-" * 45)
         print(f"Predicted Speaker: {best_spk} (Score: {scores[best_spk]:.4f})\n")
+
+    elif args.command == "diarize":
+        audio, sr = sf.read(args.audio_path)
+        turns = recognizer.diarize(audio, num_speakers=args.num_speakers, threshold=args.threshold)
+        print(f"\nDiarization Results for {args.audio_path}:")
+        print("-" * 55)
+        for t in turns:
+            print(f"  [{t.start:6.2f}s - {t.end:6.2f}s] {t.match.label:<15} (confidence: {t.match.score:.3f})")
+        print("-" * 55)
+        print(f"Total turns detected: {len(turns)}\n")
 
     elif args.command == "stream":
         audio, sr = sf.read(args.audio_path)

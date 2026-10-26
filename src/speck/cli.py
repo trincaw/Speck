@@ -64,7 +64,12 @@ def speaker_factory(args: argparse.Namespace, sample_rate: int):
         console.print(f"[bold]Enrolled:[/bold] {', '.join(voices)}")
 
     def new_classifier() -> SpeakerClassifier:
-        classifier = SpeakerClassifier(embedder, threshold=args.speaker_threshold, max_speakers=args.num_speakers or 0)
+        classifier = SpeakerClassifier(
+            embedder,
+            threshold=args.speaker_threshold,
+            max_speakers=args.num_speakers or 0,
+            start_id=1,
+        )
         for name, wav in voices.items():
             classifier.enroll(name, wav)
         return classifier
@@ -328,7 +333,7 @@ def handle_mixed(args):
                              system_device=args.system_source, sample_rate=engine.sampling_rate)
 
     console.print(f"[bold]Mic:[/bold] [cyan]{args.mic_source}[/cyan] → [{args.me}]  "
-                  f"[bold]System:[/bold] [cyan]{args.system_source}[/cyan] → {"[Speaker N]" if args.speakers else f"[{args.remote}]"}  "
+                  f"[bold]System:[/bold] [cyan]{args.system_source}[/cyan] → {"[Speaker 1, Speaker 2...]" if args.speakers else f"[{args.remote}]"}  "
                   f"[bold]Echo guard:[/bold] {'on' if args.echo_guard else 'off'}")
     console.print("[bold green]Listening... press Ctrl+C to stop.[/bold green]\n")
     capture.start()
@@ -490,10 +495,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--list", action="store_true", help="Show playback streams and capture sources, then exit")
 
     p = add("mixed", handle_mixed, "Mic + system audio as separate channels: you vs. remote speakers (Linux)",
-            [engine_opts, asr_opts, lookahead_opts, speaker_opts, diarize_opts])
+            [engine_opts, asr_opts, lookahead_opts, speaker_opts, live_speaker_opts])
+    p.add_argument("--speakers", action=argparse.BooleanOptionalAction, default=True,
+                   help="Classify each remote speaker as Speaker 1, Speaker 2, etc. (default: on; use --no-speakers for generic [Remote])")
     p.add_argument("--me", default="You", help="Label for the microphone channel (default: %(default)s)")
     p.add_argument("--remote", default="Remote",
-                   help="Label for the system audio channel (default: %(default)s; --speakers labels each remote voice)")
+                   help="Label for the system audio channel when --no-speakers is used (default: %(default)s)")
     p.add_argument("--mic-source", default="@DEFAULT_SOURCE@", help="Microphone source (see `speck listen --list`)")
     p.add_argument("--system-source", default="@DEFAULT_MONITOR@", help="System audio source (a sink monitor)")
     p.add_argument("--echo-guard", action=argparse.BooleanOptionalAction, default=True,

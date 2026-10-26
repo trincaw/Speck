@@ -8,9 +8,9 @@ This guide explains what assets are required for Speck's speaker recognition and
 
 To run speaker identification, real-time streaming, and the metrics benchmark, two types of assets are required:
 
-1. **Pre-trained ONNX Speaker Embedding Model** (`models/`):
-   - Default: `models/campplus_cn_en_common_200k.onnx` (Compact Attention Module backbone, ~28MB).
-   - Maps 80-channel log-Mel spectrogram frames to a 192-dimensional speaker identity vector.
+1. **Pre-trained ONNX Speaker Diarization & Embedding Models**:
+   - Pyannote Segmentation: `csukuangfj/sherpa-onnx-pyannote-segmentation-3-0` (neural speaker turn boundary & overlap detection).
+   - Voice Recognition Backbone: `csukuangfj/speaker-embedding-models/wespeaker_en_voxceleb_resnet34_LM.onnx` (the official pyannote.audio 3.x voice embedding model).
 2. **Audio WAV Files** (`data/`):
    - Multi-speaker audio recordings formatted into speaker subdirectories.
    - Used for enrollment, streaming inference, and 1:1 verification / 1:N identification benchmarks.

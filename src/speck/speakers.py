@@ -109,6 +109,11 @@ class SpeakerClassifier:
     aliases: dict[str, str] = field(default_factory=dict)
     _last: Optional[_Speaker] = field(default=None, repr=False)
     _next_id: int = field(default=0, repr=False)
+    start_id: int = 0
+
+    def __post_init__(self) -> None:
+        if self.start_id != 0 and self._next_id == 0:
+            self._next_id = self.start_id
 
     def enroll(self, label: str, samples: np.ndarray) -> None:
         """Register a known person from a clean voice sample (a few seconds is enough)."""

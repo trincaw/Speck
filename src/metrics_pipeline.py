@@ -15,7 +15,7 @@ from src.metrics import (
     compute_latency_percentiles,
     compute_rtf
 )
-from src.neural_recognizer import NeuralSpeakerRecognizer
+from speck.pyannote import PyannoteSpeakerRecognizer
 from src.streaming import RealTimeStreamingEngine
 
 class SpeakerMetricsPipeline:
@@ -29,7 +29,7 @@ class SpeakerMetricsPipeline:
     5. Artifact Exporting (JSON summary, CSV ROC curve, Markdown report)
     """
     def __init__(self, recognizer=None, data_dir="data", output_dir="reports"):
-        self.recognizer = recognizer or NeuralSpeakerRecognizer()
+        self.recognizer = recognizer or PyannoteSpeakerRecognizer()
         self.data_dir = data_dir
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
@@ -252,10 +252,11 @@ class SpeakerMetricsPipeline:
         ident = results["identification"]
         stream = results["streaming"]
         
+        arch_name = getattr(self.recognizer, "architecture_name", "Pyannote.audio (pyannote/segmentation-3.0 + WeSpeaker ResNet34)")
         md_content = f"""# Speaker Recognition Evaluation Report
 
 **Generated on:** {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}  
-**Model Architecture:** CAM++ (ONNX FP32)  
+**Model Architecture:** {arch_name}  
 **Task:** Text-Independent Speaker Verification & Identification  
 
 ---
