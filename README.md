@@ -79,22 +79,44 @@ Add your own engine by subclassing `BaseASREngine` and calling `speck.factory.re
 uv run pytest
 ```
 
-## Speaker Recognition Metrics Pipeline
+## Metrics & Evaluation Pipelines
 
-Speck includes an automated evaluation pipeline measuring **Equal Error Rate (EER)**, **NIST minDCF**, **AUC-ROC**, and **real-time streaming latency**:
+Speck provides standardized evaluation pipelines for both **Speaker Recognition** and **Text-to-Speech (TTS) / Speech Intelligibility**:
+
+### 1. Speaker Recognition Pipeline
+Measures **Equal Error Rate (EER)**, **NIST minDCF**, **AUC-ROC**, and **real-time streaming latency**:
 
 ```bash
 # 1. Download models and benchmark audio WAV dataset
 python scripts/download_assets.py --all
 
-# 2. Run the metrics pipeline
-python main.py evaluate --data-dir data/ --output-dir reports/
+# 2. Run speaker verification & identification evaluation
+python main.py evaluate --task speaker --data-dir data/ --output-dir reports/
+```
+
+### 2. Text-to-Speech (TTS) & Linguistic Pipeline (English & Italian)
+Measures objective speech synthesis quality and round-trip intelligibility:
+* **Acoustic Fidelity:** **Mel-Cepstral Distortion (MCD)** via Dynamic Time Warping (DTW) in dB.
+* **Prosody Tracking:** **$F_0$ Pitch RMSE** (Hz and cents), **$F_0$ Pearson Correlation Coefficient (PCC)**, **Voicing Decision Error (VDE)**, and **Gross Pitch Error (GPE)**.
+* **Speaker Identity (SECS):** Deep speaker embedding cosine similarity between reference and synthesized voices.
+* **Linguistic Accuracy & Intelligibility:** Normalized **Word Error Rate (WER)**, **Character Error Rate (CER)**, **Match Error Rate (MER)**, and **Word Information Lost (WIL)** with specialized normalizers for:
+  * **English (`en-US`):** Contraction expansion (`it's` -> `it is`, `don't` -> `do not`), punctuation normalization.
+  * **Italian (`it-IT`):** Italian apostrophe elisions (`l'albero`, `un'altra`, `c'è`, `qual è`) and vowel accent preservation (`à`, `è`, `é`, `ì`, `ò`, `ù`).
+
+```bash
+# Run TTS evaluation suite across English and Italian
+python main.py evaluate --task tts --output-dir reports/
+
+# Or run the entire unified test suite via pytest
+uv run pytest tests/test_tts_metrics.py -v
 ```
 
 Generated evaluation artifacts are stored in `reports/`:
-- `reports/EVALUATION_REPORT.md`: Comprehensive executive report with benchmark metrics and latency percentiles.
-- `reports/metrics_summary.json`: Machine-readable evaluation dump.
-- `reports/roc_curve.csv`: Coordinates for plotting ROC curves.
+- `reports/EVALUATION_REPORT.md`: Speaker recognition executive report.
+- `reports/metrics_summary.json`: Machine-readable speaker evaluation dump.
+- `reports/TTS_EVALUATION_REPORT.md`: Multilingual TTS and linguistic evaluation report.
+- `reports/tts_metrics_summary.json`: Machine-readable TTS evaluation dump.
+- `reports/roc_curve.csv`: Coordinates for plotting verification ROC curves.
 
 For detailed instructions on obtaining WAV files, converting your own voice recordings, and downloading model weights, see [docs/data_and_models.md](docs/data_and_models.md).
 

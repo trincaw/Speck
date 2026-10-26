@@ -172,3 +172,42 @@ def compute_rtf(elapsed_seconds, audio_duration_seconds):
     if audio_duration_seconds <= 0:
         return 0.0
     return float(elapsed_seconds / audio_duration_seconds)
+
+
+# Re-export Text-to-Speech (TTS) and linguistic speech evaluation metrics
+from speck.tts_metrics import (
+    MCD_FACTOR,
+    TTSMetricsPipeline,
+    compute_cer,
+    compute_f0_metrics,
+    compute_mcd,
+    compute_mer_and_wil,
+    compute_speaker_similarity,
+    compute_speech_text_metrics,
+    compute_wer,
+    normalize_english_text,
+    normalize_italian_text,
+    normalize_text,
+)
+
+__all__ = [
+    "compute_eer",
+    "compute_min_dcf",
+    "compute_roc_curve",
+    "compute_auc",
+    "compute_identification_metrics",
+    "compute_latency_percentiles",
+    "compute_rtf",
+    "compute_mcd",
+    "compute_f0_metrics",
+    "compute_speaker_similarity",
+    "compute_wer",
+    "compute_cer",
+    "compute_mer_and_wil",
+    "compute_speech_text_metrics",
+    "normalize_text",
+    "normalize_english_text",
+    "normalize_italian_text",
+    "TTSMetricsPipeline",
+    "MCD_FACTOR",
+]

@@ -17,6 +17,19 @@ from speck.pyannote import PyannoteSpeakerRecognizer
 from speck.vad import VadSegmenter
 from speck.streamer import LiveAudioStreamSession, SpeakerStreamSession
 from speck.utils import LOOKAHEAD_CONFIGS, SUPPORTED_LANGUAGES
+from speck.tts_metrics import (
+    compute_mcd,
+    compute_f0_metrics,
+    compute_speaker_similarity,
+    compute_wer,
+    compute_cer,
+    compute_mer_and_wil,
+    compute_speech_text_metrics,
+    normalize_text,
+    normalize_english_text,
+    normalize_italian_text,
+    TTSMetricsPipeline,
+)
 
 __all__ = [
     "BaseASREngine",
@@ -37,6 +50,17 @@ __all__ = [
     "LOOKAHEAD_CONFIGS",
     "SUPPORTED_LANGUAGES",
     "load_env_file",
+    "compute_mcd",
+    "compute_f0_metrics",
+    "compute_speaker_similarity",
+    "compute_wer",
+    "compute_cer",
+    "compute_mer_and_wil",
+    "compute_speech_text_metrics",
+    "normalize_text",
+    "normalize_english_text",
+    "normalize_italian_text",
+    "TTSMetricsPipeline",
 ]
 
 try:
