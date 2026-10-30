@@ -124,19 +124,104 @@ def _standardize_quotes(text: str) -> str:
     return re.sub(r"[’‘`´]", "'", text)
 
 
-def normalize_english_text(text: str, expand_contractions: bool = True) -> str:
+# Hesitation sounds that references never transcribe but ASR models often emit
+_EN_FILLERS = frozenset({"uh", "um", "uhm", "umm", "erm", "hmm", "hm", "mm", "mmm", "mhm"})
+_IT_FILLERS = frozenset({"ehm", "ehmm", "eh", "uhm", "uh", "mh", "mhm", "hmm", "mmm"})
+
+_NUM_UNITS = {
+    w: i for i, w in enumerate(
+        "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen "
+        "fifteen sixteen seventeen eighteen nineteen".split()
+    )
+}
+_NUM_TENS = {w: 10 * i for i, w in enumerate("twenty thirty forty fifty sixty seventy eighty ninety".split(), start=2)}
+_NUM_SCALES = {"thousand": 1_000, "million": 1_000_000, "billion": 1_000_000_000}
+_NUM_WORDS = frozenset(_NUM_UNITS) | frozenset(_NUM_TENS) | {"hundred"}
+
+
+def _parse_spoken_number(tokens: list[str], start: int) -> tuple[int, int]:
+    """Parse the cardinal starting at `start`; returns (value, tokens consumed)."""
+    total = current = 0
+    last = None  # kind of the previous word: unit / tens / hundred / scale
+    i = start
+    while i < len(tokens):
+        w = tokens[i]
+        if w in _NUM_UNITS:
+            n = _NUM_UNITS[w]
+            # units attach to a tens word ("thirty five"), teens and zero only start a number
+            if last == "unit" or (n == 0 and last is not None) or (n >= 10 and last == "tens"):
+                break
+            current += n
+            last = "unit"
+        elif w in _NUM_TENS:
+            if last not in (None, "hundred", "scale"):
+                break
+            current += _NUM_TENS[w]
+            last = "tens"
+        elif w == "hundred":
+            if last != "unit" or current >= 100 or current == 0:
+                break
+            current *= 100
+            last = "hundred"
+        elif w in _NUM_SCALES:
+            if last not in ("unit", "tens", "hundred"):
+                break
+            total += current * _NUM_SCALES[w]
+            current = 0
+            last = "scale"
+        elif w == "and" and last in ("hundred", "scale") and i + 1 < len(tokens) and tokens[i + 1] in _NUM_WORDS:
+            pass  # "one hundred and five"
+        else:
+            break
+        i += 1
+    while i > start and tokens[i - 1] == "and":
+        i -= 1
+    return total + current, i - start
+
+
+def spoken_numbers_to_digits(text: str) -> str:
+    """Rewrite spelled-out English cardinals as digits ("thirty five" -> "35") in whitespace-split text.
+
+    Applied to reference and hypothesis alike, so "35" vs "thirty five" no longer counts as an error.
+    Adjacent numbers that do not compose ("twenty twenty") stay separate numbers.
+    """
+    tokens = text.split()
+    out: list[str] = []
+    i = 0
+    while i < len(tokens):
+        if tokens[i] in _NUM_WORDS:
+            value, used = _parse_spoken_number(tokens, i)
+            if used:
+                out.append(str(value))
+                i += used
+                continue
+        out.append(tokens[i])
+        i += 1
+    return " ".join(out)
+
+
+def normalize_english_text(
+    text: str,
+    expand_contractions: bool = True,
+    strip_fillers: bool = True,
+    normalize_numbers: bool = True,
+) -> str:
     """
     Standardizes English text for acoustic and linguistic evaluation:
     - Lowercases text
     - Standardizes quotation marks
     - Expands common contractions (e.g. "don't" -> "do not")
     - Strips punctuation and symbols while preserving alphanumeric tokens
+    - Drops hesitation fillers ("uh", "um") when `strip_fillers` is set
+    - Writes spelled-out numbers as digits ("thirty five" -> "35") when `normalize_numbers` is set
     - Collapses repeated whitespace
     """
     if not text:
         return ""
 
     t = _standardize_quotes(text).lower()
+    t = re.sub(r"(?<=\d),(?=\d{3}\b)", "", t)  # 1,000 -> 1000
+    t = t.replace("%", " percent ")
 
     if expand_contractions:
         # Match word contractions
@@ -153,13 +238,19 @@ def normalize_english_text(text: str, expand_contractions: bool = True) -> str:
 
     # Strip remaining punctuation and special characters
     t = re.sub(r"[^a-z0-9\s]", " ", t)
-    return re.sub(r"\s+", " ", t).strip()
+    t = re.sub(r"\s+", " ", t).strip()
+    if strip_fillers:
+        t = " ".join(w for w in t.split() if w not in _EN_FILLERS)
+    if normalize_numbers:
+        t = spoken_numbers_to_digits(t)
+    return t
 
 
 def normalize_italian_text(
     text: str,
     preserve_accents: bool = True,
     split_apostrophes: bool = True,
+    strip_fillers: bool = True,
 ) -> str:
     """
     Standardizes Italian text for speech evaluation according to Italian phonetics & grammar:
@@ -199,7 +290,10 @@ def normalize_italian_text(
     # Remove stray standalone apostrophes
     t = re.sub(r"\s+'+\s+", " ", t)
     t = re.sub(r"^'+|'+$", "", t)
-    return re.sub(r"\s+", " ", t).strip()
+    t = re.sub(r"\s+", " ", t).strip()
+    if strip_fillers:
+        t = " ".join(w for w in t.split() if w not in _IT_FILLERS)
+    return t
 
 
 def normalize_text(

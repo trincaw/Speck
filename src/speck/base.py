@@ -10,7 +10,8 @@ from typing import TYPE_CHECKING, Any, Callable, Generator, Optional, Union
 import numpy as np
 import torch
 
-from speck.utils import to_mono_float32
+from speck.config import get_hotwords, get_normalize_audio
+from speck.utils import normalize_audio, to_mono_float32
 
 if TYPE_CHECKING:
     from speck.speakers import SpeakerClassifier
@@ -54,8 +55,10 @@ class BaseASREngine(ABC):
         model_id: str,
         device: Optional[str] = None,
         dtype: Optional[torch.dtype] = None,
+        hotwords: Optional[list[str]] = None,
     ):
         self.model_id = model_id
+        self.hotwords = hotwords if hotwords is not None else get_hotwords()
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.dtype = dtype or (torch.float16 if self.device == "cuda" else torch.float32)
         self._is_loaded = False
@@ -97,7 +100,16 @@ class BaseASREngine(ABC):
         else:
             wav = audio
         wav = to_mono_float32(wav)
+        if get_normalize_audio():
+            wav = normalize_audio(wav)
         return wav, len(wav) / target_sr
+
+    def _postprocess(self, text: str) -> str:
+        """Snap near-miss words to the configured hotword vocabulary (no-op without one)."""
+        if not self.hotwords or not text:
+            return text
+        from speck.postprocess import correct_vocabulary
+        return correct_vocabulary(text, self.hotwords)
 
     @abstractmethod
     def transcribe(

@@ -6,8 +6,10 @@ Downloads pre-trained speaker recognition ONNX models and benchmark speech datas
 
 import os
 import argparse
+import tarfile
 import urllib.request
 import sys
+import zlib
 
 def download_model(model_name="campplus", output_dir="models"):
     os.makedirs(output_dir, exist_ok=True)
@@ -68,15 +70,48 @@ def download_cmu_arctic_dataset(output_dir="data", speakers=None, utterances_per
 
     print(f"[OK] Dataset ready in '{output_dir}'. ({total_downloaded} new files downloaded)")
 
+def download_librispeech(output_dir="data/librispeech", split="test-clean", chapter_step=5):
+    """
+    Streams a LibriSpeech evaluation split from OpenSLR and keeps every `chapter_step`-th chapter
+    (FLAC + transcripts), giving a speaker-diverse subset: step 5 on test-clean is ~1 hour of audio.
+    """
+    url = f"https://www.openslr.org/resources/12/{split}.tar.gz"
+    dest = os.path.join(output_dir, split)
+    if os.path.isdir(dest) and any(f.endswith(".trans.txt") for _, _, fs in os.walk(dest) for f in fs):
+        print(f"[OK] LibriSpeech {split} already present in {dest}")
+        return dest
+
+    print(f"[...] Streaming {url} (keeping 1 chapter in {chapter_step})...")
+    kept = 0
+    with urllib.request.urlopen(url) as response, tarfile.open(fileobj=response, mode="r|gz") as tar:
+        for member in tar:
+            if not member.isfile():
+                continue
+            parts = member.name.split("/")  # LibriSpeech/<split>/<speaker>/<chapter>/<file>
+            if len(parts) < 5 or zlib.crc32("/".join(parts[2:4]).encode()) % chapter_step:
+                continue
+            target = os.path.join(dest, *parts[2:])
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            with open(target, "wb") as out:
+                out.write(tar.extractfile(member).read())
+            kept += member.name.endswith(".flac")
+    print(f"[OK] {kept} utterances written to {dest}")
+    return dest
+
 def main():
     parser = argparse.ArgumentParser(description="Download models and audio datasets for Speck")
     parser.add_argument("--models", action="store_true", help="Download ONNX speaker recognition models")
     parser.add_argument("--data", action="store_true", help="Download benchmark speech dataset (WAV files)")
     parser.add_argument("--all", action="store_true", help="Download both models and datasets (default)")
+    parser.add_argument("--librispeech", choices=["test-clean", "test-other"], help="Download a LibriSpeech ASR evaluation subset")
+    parser.add_argument("--chapter-step", type=int, default=5, help="Keep 1 LibriSpeech chapter in N (default: 5, ~1 h of test-clean)")
     parser.add_argument("--models-dir", default="models", help="Directory for models (default: models)")
     parser.add_argument("--data-dir", default="data", help="Directory for audio dataset (default: data)")
     
     args = parser.parse_args()
+    if args.librispeech:
+        download_librispeech(output_dir=os.path.join(args.data_dir, "librispeech"), split=args.librispeech, chapter_step=args.chapter_step)
+        return
     if not (args.models or args.data or args.all):
         args.all = True
 

@@ -143,3 +143,43 @@ def test_voxtral_stream_transcribe():
         text = "".join(chunks).strip()
         assert "Streaming test" in text
         assert "from Voxtral" in text
+
+
+def test_factory_resolves_whisper_and_parakeet():
+    from speck.engines.parakeet import ParakeetASR
+    from speck.engines.whisper import WhisperASR
+
+    for alias, model_id in [("whisper-base", "base"), ("whisper-large-v3-turbo", "large-v3-turbo"), ("whisper", "large-v3-turbo")]:
+        engine = get_engine(alias)
+        assert isinstance(engine, WhisperASR) and engine.model_id == model_id
+    assert get_engine("Systran/faster-whisper-small").model_id == "Systran/faster-whisper-small"
+    assert isinstance(get_engine("parakeet"), ParakeetASR)
+
+
+def test_correct_vocabulary_snaps_near_misses_only():
+    from speck.postprocess import correct_vocabulary
+
+    assert correct_vocabulary("Call Avale support", ["Avvale"]) == "Call Avvale support"
+    assert correct_vocabulary("deploy on Kubernetis", ["Kubernetes"]) == "deploy on Kubernetes"
+    assert correct_vocabulary("the cat sat", ["Kat"]) == "the cat sat"  # too short to rewrite
+    assert correct_vocabulary("hello world", []) == "hello world"
+
+
+def test_rover_majority_vote():
+    from speck.postprocess import rover
+
+    votes = ["the cat sat on a mat", "the cat sat on the mat", "the bat sat on the mat today", "the cat sat on the mat"]
+    assert rover(votes) == "the cat sat on the mat"
+    assert rover(["a b c", "a c", "a b c d"]) == "a b c"
+    assert rover([]) == ""
+
+
+def test_normalize_audio_scales_to_peak_and_spares_silence():
+    from speck.utils import normalize_audio
+
+    quiet = (0.2 * np.sin(np.linspace(0, 200, 16000)) + 0.01).astype(np.float32)
+    loud = normalize_audio(quiet)
+    assert abs(np.abs(loud).max() - 0.9) < 1e-3
+    assert abs(loud.mean()) < 1e-3  # DC offset removed
+    silent = np.full(1600, 1e-6, dtype=np.float32)
+    assert np.abs(normalize_audio(silent)).max() < 1e-4  # no noise amplification

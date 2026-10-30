@@ -433,3 +433,22 @@ def test_tts_metrics_pipeline_end_to_end(tmp_path):
         assert "English (en-US)" in md_text
         assert "Italian (it-IT)" in md_text
         assert "Mel-Cepstral Distortion (MCD)" in md_text
+
+
+def test_normalize_english_drops_fillers_and_spells_numbers():
+    assert normalize_english_text("It was uh thirty five degrees, minus um twenty.") == "it was 35 degrees minus 20"
+    assert normalize_english_text("one hundred and five") == "105"
+    assert normalize_english_text("two thousand twenty four") == "2024"
+    assert normalize_english_text("one hundred twenty three thousand four hundred and fifty six") == "123456"
+    assert normalize_english_text("twenty twenty") == "20 20"  # numbers that do not compose stay apart
+    assert normalize_english_text("seven and eight") == "7 and 8"
+    assert normalize_english_text("1,000 and 99%") == "1000 and 99 percent"
+
+
+def test_wer_ignores_fillers_and_number_format():
+    result = compute_wer("It was 35 degrees in Barcelona.", "It was uh thirty five degrees in Barcelona.")
+    assert result["wer"] == 0.0
+
+
+def test_normalize_italian_drops_fillers():
+    assert normalize_italian_text("ehm buongiorno a tutti") == "buongiorno a tutti"

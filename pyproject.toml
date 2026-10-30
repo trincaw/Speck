@@ -17,6 +17,7 @@ dependencies = [
     "torch>=2.1.0",
     "transformers>=5.13.0",
     "librosa>=1.0.0",
+    "faster-whisper>=1.2.1",
 ]
 
 [project.scripts]

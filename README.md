@@ -10,6 +10,8 @@ Model-agnostic speech recognition with real-time streaming and live speaker labe
 |---|---|---|
 | NVIDIA Nemotron 3.5 (0.6B) | `nemotron` | Local, streaming, 80–1120 ms latency |
 | Mistral Voxtral Mini Transcribe 2 | `voxtral` | Cloud API (`MISTRAL_API_KEY`) or local weights |
+| Whisper (faster-whisper) | `whisper`, `whisper-base`, `whisper-large-v3-turbo`, … | Local, offline; beam search, VAD filter, hotwords |
+| NVIDIA Parakeet-TDT v3 (0.6B) | `parakeet` | **Default.** Local, offline, 25 European languages; live mode transcribes per utterance (VAD) |
 
 ## Install
 
@@ -59,7 +61,7 @@ speck mixed --speakers --save call.txt                  # --me/--remote rename l
 ```python
 from speck import get_engine, SpeakerClassifier, SpeakerEmbedder
 
-engine = get_engine("nemotron").load()      # defaults to SPECK_MODEL
+engine = get_engine("parakeet").load()      # defaults to SPECK_MODEL (parakeet)
 print(engine.transcribe("audio.mp3", language="en-US").text)
 
 # live: push 16 kHz mono float32 chunks, read text as it arrives
@@ -72,6 +74,25 @@ session.finish(); session.join()
 ```
 
 Add your own engine by subclassing `BaseASREngine` and calling `speck.factory.register_engine(alias, cls)`.
+
+## Lowering the error rate
+
+| Setting (`.env`) | Effect |
+|---|---|
+| `SPECK_LANGUAGE=en` | Locks Whisper to one language (no identification pass, no false switches); also the CLI `--language` default |
+| `SPECK_HOTWORDS=Avvale,Kubernetes` | Biases Whisper decoding and snaps near-miss words in every engine's output to this vocabulary |
+| `SPECK_BEAM_SIZE=5` | Whisper beam width |
+| `SPECK_NORMALIZE_AUDIO=1` | DC removal and peak normalization of offline audio (`0` disables) |
+
+`speck.rover([text_a, text_b, text_c])` merges transcripts from several engines by word-level majority vote.
+
+WER is computed on normalized text: punctuation, casing, hesitation fillers ("uh", "um") and number format
+("35" vs "thirty five") are ignored. Measure on a real set, not three clips:
+
+```bash
+python scripts/download_assets.py --librispeech test-clean          # ~1 h subset
+python scripts/asr_benchmark.py --models nemotron whisper-large-v3-turbo parakeet --ensemble
+```
 
 ## Tests
 

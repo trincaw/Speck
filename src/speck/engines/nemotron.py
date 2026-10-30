@@ -92,6 +92,7 @@ class NemotronASR(BaseASREngine):
         raw_text = self.processor.decode(sequence, skip_special_tokens=False).strip()
         _, detected_lang = parse_language_tag(raw_text)
         text = self.processor.decode(sequence, skip_special_tokens=True).strip() if skip_special_tokens else raw_text
+        text = self._postprocess(text)
 
         return TranscriptionResult(
             text=text,

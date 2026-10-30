@@ -14,7 +14,7 @@ import torch
 
 from speck.base import AudioInput, BaseASREngine, TranscriptionResult, rtf
 from speck.config import get_mistral_api_key, get_voxtral_api_url, get_voxtral_backend, get_voxtral_model
-from speck.utils import LanguageTier
+from speck.utils import LanguageTier, iso639_1 as _iso639_1
 
 logger = logging.getLogger(__name__)
 
@@ -32,13 +32,6 @@ VOXTRAL_STREAMING_PRESETS = {
     6: {"name": "high-accuracy", "latency_ms": 1000.0, "description": "1000ms chunk (High Accuracy - default)"},
     13: {"name": "maximum-accuracy", "latency_ms": 2000.0, "description": "2000ms chunk (Maximum Accuracy)"},
 }
-
-
-def _iso639_1(language: Optional[str]) -> Optional[str]:
-    """'en-US' -> 'en'; 'auto' / empty -> None."""
-    if not language or language.lower() in ("auto", "none"):
-        return None
-    return language.split("-")[0].lower()
 
 
 class VoxtralASR(BaseASREngine):
@@ -114,7 +107,7 @@ class VoxtralASR(BaseASREngine):
 
         elapsed = time.perf_counter() - start
         return TranscriptionResult(
-            text=text,
+            text=self._postprocess(text),
             raw_text=text,
             detected_language=detected_lang,
             duration_seconds=duration,

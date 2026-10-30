@@ -6,9 +6,11 @@ from speck.asr import (
     BaseASREngine,
     BenchmarkResult,
     NemotronASR,
+    ParakeetASR,
     TranscriptionResult,
     VoxtralASR,
     VoxtralMiniTranscribe,
+    WhisperASR,
     get_engine,
 )
 from speck.config import load_env_file
@@ -30,10 +32,13 @@ from speck.tts_metrics import (
     normalize_italian_text,
     TTSMetricsPipeline,
 )
+from speck.postprocess import correct_vocabulary, rover
 
 __all__ = [
     "BaseASREngine",
     "NemotronASR",
+    "ParakeetASR",
+    "WhisperASR",
     "VoxtralASR",
     "VoxtralMiniTranscribe",
     "get_engine",
@@ -61,6 +66,8 @@ __all__ = [
     "normalize_english_text",
     "normalize_italian_text",
     "TTSMetricsPipeline",
+    "correct_vocabulary",
+    "rover",
 ]
 
 try:

@@ -7,7 +7,9 @@ from __future__ import annotations
 
 from speck.base import BaseASREngine, BenchmarkResult, TranscriptionResult
 from speck.engines.nemotron import NemotronASR
+from speck.engines.parakeet import ParakeetASR
 from speck.engines.voxtral import VoxtralASR, VoxtralMiniTranscribe
+from speck.engines.whisper import WhisperASR
 from speck.factory import get_engine, list_available_models, register_engine
 
 __all__ = [
@@ -15,6 +17,8 @@ __all__ = [
     "TranscriptionResult",
     "BenchmarkResult",
     "NemotronASR",
+    "ParakeetASR",
+    "WhisperASR",
     "VoxtralASR",
     "VoxtralMiniTranscribe",
     "get_engine",

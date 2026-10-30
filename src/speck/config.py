@@ -76,7 +76,7 @@ def env(*keys: str, default: T = None, cast: Callable[[str], T] = str) -> T:
 
 
 def get_model_name() -> str:
-    return env("SPECK_MODEL", "ASR_MODEL", default="nemotron")
+    return env("SPECK_MODEL", "ASR_MODEL", default="parakeet")
 
 
 def get_device() -> Optional[str]:
@@ -107,3 +107,27 @@ def get_voxtral_api_url() -> str:
 def get_speaker_threshold() -> float:
     """Cosine similarity needed to match a known speaker during live classification."""
     return env("SPECK_SPEAKER_THRESHOLD", default=0.35, cast=float)
+
+
+def get_language() -> str:
+    """Default locale ('en', 'it-IT', ...) or 'auto'; locks multilingual models to one language."""
+    return env("SPECK_LANGUAGE", default="auto")
+
+
+def get_hotwords() -> list[str]:
+    """Domain vocabulary (names, jargon) the ASR output is biased and corrected towards."""
+    raw = env("SPECK_HOTWORDS", default="")
+    return [w.strip() for w in raw.split(",") if w.strip()]
+
+
+def get_normalize_audio() -> bool:
+    """Peak-normalize offline audio before inference (SPECK_NORMALIZE_AUDIO=0 disables it)."""
+    return env("SPECK_NORMALIZE_AUDIO", default="1").lower() not in ("0", "false", "no", "off")
+
+
+def get_whisper_compute_type() -> str:
+    return env("SPECK_WHISPER_COMPUTE_TYPE", default="float16")
+
+
+def get_beam_size() -> int:
+    return env("SPECK_BEAM_SIZE", default=5, cast=int)

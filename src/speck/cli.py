@@ -14,7 +14,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from speck.base import BaseASREngine
-from speck.config import get_mistral_api_key, get_model_name, get_speaker_threshold, load_env_file
+from speck.config import get_language, get_mistral_api_key, get_model_name, get_speaker_threshold, load_env_file
 from speck.factory import get_engine, list_available_models
 
 console = Console()
@@ -440,7 +440,7 @@ def build_parser() -> argparse.ArgumentParser:
     engine_opts.add_argument("--device", default=None, help="'cuda' or 'cpu' (default: auto)")
 
     asr_opts = argparse.ArgumentParser(add_help=False)
-    asr_opts.add_argument("--language", default="auto", help="Locale (e.g. en-US) or 'auto'")
+    asr_opts.add_argument("--language", default=get_language(), help="Locale (e.g. en-US) or 'auto' (default: SPECK_LANGUAGE)")
     asr_opts.add_argument("--keep-tag", action="store_true", help="Keep the <xx-XX> language tag in output")
 
     lookahead_opts = argparse.ArgumentParser(add_help=False)
