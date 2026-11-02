@@ -1,181 +1,112 @@
+"""Speaker verification / identification metrics (EER, minDCF, ROC, AUC, F1, latency), plus TTS re-exports."""
+
 import numpy as np
 
+
+def _scores(target_scores, nontarget_scores):
+    return np.asarray(target_scores, dtype=np.float64), np.asarray(nontarget_scores, dtype=np.float64)
+
+
+def _count_below(scores, thresholds):
+    """Number of `scores` < each threshold, vectorized (O(n log n) instead of O(n * thresholds))."""
+    return np.searchsorted(np.sort(scores), thresholds, side="left")
+
+
+def _rate_at_or_above(scores, thresholds):
+    return (len(scores) - _count_below(scores, thresholds)) / len(scores)
+
+
+def _error_rates(targets, nontargets):
+    """(thresholds, false-negative rate, false-positive rate) at every observed score."""
+    thresholds = np.unique(np.concatenate([targets, nontargets]))
+    return thresholds, _count_below(targets, thresholds) / len(targets), _rate_at_or_above(nontargets, thresholds)
+
+
 def compute_eer(target_scores, nontarget_scores):
-    """
-    Computes the Equal Error Rate (EER) where False Acceptance Rate (FAR) == False Rejection Rate (FRR).
-    Returns (eer, optimal_threshold).
-    """
-    target_scores = np.asarray(target_scores, dtype=np.float64)
-    nontarget_scores = np.asarray(nontarget_scores, dtype=np.float64)
-    
-    if len(target_scores) == 0 or len(nontarget_scores) == 0:
+    """Equal Error Rate, where false acceptance == false rejection. Returns (eer, optimal_threshold)."""
+    targets, nontargets = _scores(target_scores, nontarget_scores)
+    if len(targets) == 0 or len(nontargets) == 0:
         return 1.0, 0.0
-    
-    thresholds = np.unique(np.sort(np.concatenate([target_scores, nontarget_scores])))
-    num_targets = len(target_scores)
-    num_nontargets = len(nontarget_scores)
-    
-    fnr = np.array([np.sum(target_scores < t) / num_targets for t in thresholds])
-    fpr = np.array([np.sum(nontarget_scores >= t) / num_nontargets for t in thresholds])
-    
-    diff = np.abs(fnr - fpr)
-    best_idx = np.argmin(diff)
-    
-    eer = (fnr[best_idx] + fpr[best_idx]) / 2.0
-    optimal_threshold = thresholds[best_idx]
-    
-    return float(eer), float(optimal_threshold)
+    thresholds, fnr, fpr = _error_rates(targets, nontargets)
+    best = np.argmin(np.abs(fnr - fpr))
+    return float((fnr[best] + fpr[best]) / 2.0), float(thresholds[best])
+
 
 def compute_min_dcf(target_scores, nontarget_scores, p_target=0.01, c_miss=1.0, c_fa=1.0):
-    """
-    Computes minimum Detection Cost Function (minDCF) according to NIST SRE specifications.
+    """Normalized minimum Detection Cost Function (NIST SRE):
     DCF = C_miss * P_miss * P_target + C_fa * P_fa * (1 - P_target)
     """
-    target_scores = np.asarray(target_scores, dtype=np.float64)
-    nontarget_scores = np.asarray(nontarget_scores, dtype=np.float64)
-    
-    if len(target_scores) == 0 or len(nontarget_scores) == 0:
+    targets, nontargets = _scores(target_scores, nontarget_scores)
+    if len(targets) == 0 or len(nontargets) == 0:
         return 1.0
-        
-    thresholds = np.unique(np.sort(np.concatenate([target_scores, nontarget_scores])))
-    num_targets = len(target_scores)
-    num_nontargets = len(nontarget_scores)
-    
-    p_miss = np.array([np.sum(target_scores < t) / num_targets for t in thresholds])
-    p_fa = np.array([np.sum(nontarget_scores >= t) / num_nontargets for t in thresholds])
-    
+    _, p_miss, p_fa = _error_rates(targets, nontargets)
     dcf = c_miss * p_miss * p_target + c_fa * p_fa * (1.0 - p_target)
-    c_def = min(c_miss * p_target, c_fa * (1.0 - p_target))
-    min_dcf = np.min(dcf) / c_def
-    
-    return float(min_dcf)
+    return float(np.min(dcf) / min(c_miss * p_target, c_fa * (1.0 - p_target)))
+
 
 def compute_roc_curve(target_scores, nontarget_scores):
-    """
-    Computes False Positive Rate (FPR) and True Positive Rate (TPR = 1 - FNR)
-    across candidate thresholds for exact ROC curve analysis.
-    """
-    target_scores = np.asarray(target_scores, dtype=np.float64)
-    nontarget_scores = np.asarray(nontarget_scores, dtype=np.float64)
-    
-    if len(target_scores) == 0 or len(nontarget_scores) == 0:
+    """Exact ROC curve: (FPR, TPR, thresholds) from +inf down to -inf."""
+    targets, nontargets = _scores(target_scores, nontarget_scores)
+    if len(targets) == 0 or len(nontargets) == 0:
         return [0.0, 1.0], [0.0, 1.0], [1.0, 0.0]
-        
-    unique_thresholds = np.unique(np.concatenate([target_scores, nontarget_scores]))[::-1]
-    
-    num_targets = len(target_scores)
-    num_nontargets = len(nontarget_scores)
-    
-    fpr_list = [0.0]
-    tpr_list = [0.0]
-    
-    for t in unique_thresholds:
-        fpr_list.append(float(np.sum(nontarget_scores >= t) / num_nontargets))
-        tpr_list.append(float(np.sum(target_scores >= t) / num_targets))
-        
-    fpr_list.append(1.0)
-    tpr_list.append(1.0)
-    
-    thresholds = [float("inf")] + unique_thresholds.tolist() + [float("-inf")]
-    return fpr_list, tpr_list, thresholds
+    thresholds = np.unique(np.concatenate([targets, nontargets]))[::-1]
+    fpr = [0.0, *_rate_at_or_above(nontargets, thresholds).tolist(), 1.0]
+    tpr = [0.0, *_rate_at_or_above(targets, thresholds).tolist(), 1.0]
+    return fpr, tpr, [float("inf"), *thresholds.tolist(), float("-inf")]
+
 
 def compute_auc(fpr_list, tpr_list):
-    """
-    Computes Area Under the ROC Curve (AUC-ROC) using the trapezoidal rule.
-    """
+    """Area under the ROC curve (trapezoidal rule)."""
     order = np.argsort(fpr_list)
-    sorted_fpr = np.array(fpr_list)[order]
-    sorted_tpr = np.array(tpr_list)[order]
-    
-    # Support numpy 2.0+ (np.trapezoid) and legacy (np.trapz)
-    trapz_func = getattr(np, "trapezoid", getattr(np, "trapz", None))
-    if trapz_func is not None:
-        auc = trapz_func(sorted_tpr, sorted_fpr)
-    else:
-        # Fallback manual trapezoidal integration
-        auc = np.sum((sorted_fpr[1:] - sorted_fpr[:-1]) * (sorted_tpr[1:] + sorted_tpr[:-1]) / 2.0)
-    return float(auc)
+    trapezoid = getattr(np, "trapezoid", None) or np.trapz  # numpy >= 2.0 / legacy
+    return float(trapezoid(np.array(tpr_list)[order], np.array(fpr_list)[order]))
+
 
 def compute_identification_metrics(y_true, y_pred, labels=None):
-    """
-    Computes multi-class speaker identification performance:
-    - Top-1 Accuracy
-    - Macro Precision, Recall, F1-Score
-    - Confusion Matrix
-    """
-    y_true = np.asarray(y_true)
-    y_pred = np.asarray(y_pred)
-    
+    """Closed-set identification: top-1 accuracy, macro precision / recall / F1, confusion matrix."""
+    y_true, y_pred = np.asarray(y_true), np.asarray(y_pred)
     if labels is None:
-        labels = sorted(list(set(y_true) | set(y_pred)))
-    label_to_idx = {l: i for i, l in enumerate(labels)}
-    n_classes = len(labels)
-    
-    cm = np.zeros((n_classes, n_classes), dtype=int)
+        labels = sorted(set(y_true) | set(y_pred))
+    index = {label: i for i, label in enumerate(labels)}
+
+    cm = np.zeros((len(labels), len(labels)), dtype=int)
     for yt, yp in zip(y_true, y_pred):
-        if yt in label_to_idx and yp in label_to_idx:
-            cm[label_to_idx[yt], label_to_idx[yp]] += 1
-            
-    accuracy = float(np.mean(y_true == y_pred))
-    
-    # Per-class metrics
-    precisions = []
-    recalls = []
-    f1s = []
-    
-    for i in range(n_classes):
-        tp = cm[i, i]
-        fp = np.sum(cm[:, i]) - tp
-        fn = np.sum(cm[i, :]) - tp
-        
-        prec = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-        rec = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-        f1 = 2 * (prec * rec) / (prec + rec) if (prec + rec) > 0 else 0.0
-        
-        precisions.append(prec)
-        recalls.append(rec)
-        f1s.append(f1)
-        
+        if yt in index and yp in index:
+            cm[index[yt], index[yp]] += 1
+
+    tp = np.diag(cm).astype(np.float64)
+    predicted, actual = cm.sum(axis=0), cm.sum(axis=1)
+    prec = np.divide(tp, predicted, out=np.zeros_like(tp), where=predicted > 0)
+    rec = np.divide(tp, actual, out=np.zeros_like(tp), where=actual > 0)
+    f1 = np.divide(2 * prec * rec, prec + rec, out=np.zeros_like(tp), where=(prec + rec) > 0)
     return {
-        "accuracy": accuracy,
-        "macro_precision": float(np.mean(precisions)),
-        "macro_recall": float(np.mean(recalls)),
-        "macro_f1": float(np.mean(f1s)),
+        "accuracy": float(np.mean(y_true == y_pred)),
+        "macro_precision": float(np.mean(prec)),
+        "macro_recall": float(np.mean(rec)),
+        "macro_f1": float(np.mean(f1)),
         "labels": labels,
-        "confusion_matrix": cm.tolist()
+        "confusion_matrix": cm.tolist(),
     }
 
+
 def compute_latency_percentiles(latencies_ms):
-    """
-    Computes latency statistics in milliseconds (mean, std, p50, p90, p95, p99, min, max).
-    """
+    """Latency statistics in milliseconds (mean, std, p50, p90, p95, p99, min, max)."""
     arr = np.asarray(latencies_ms, dtype=np.float64)
     if len(arr) == 0:
         return {}
-        
-    return {
-        "mean_ms": float(np.mean(arr)),
-        "std_ms": float(np.std(arr)),
-        "p50_ms": float(np.percentile(arr, 50)),
-        "p90_ms": float(np.percentile(arr, 90)),
-        "p95_ms": float(np.percentile(arr, 95)),
-        "p99_ms": float(np.percentile(arr, 99)),
-        "min_ms": float(np.min(arr)),
-        "max_ms": float(np.max(arr))
-    }
+    stats = {"mean_ms": np.mean(arr), "std_ms": np.std(arr)}
+    stats.update({f"p{p}_ms": np.percentile(arr, p) for p in (50, 90, 95, 99)})
+    stats.update(min_ms=np.min(arr), max_ms=np.max(arr))
+    return {k: float(v) for k, v in stats.items()}
+
 
 def compute_rtf(elapsed_seconds, audio_duration_seconds):
-    """
-    Real-Time Factor = processing time / audio duration.
-    RTF < 1.0 means faster than real-time. RTF < 0.1 is streaming-ready.
-    """
-    if audio_duration_seconds <= 0:
-        return 0.0
-    return float(elapsed_seconds / audio_duration_seconds)
+    """Real-Time Factor = processing time / audio duration (< 1.0 is faster than real time)."""
+    return float(elapsed_seconds / audio_duration_seconds) if audio_duration_seconds > 0 else 0.0
 
 
 # Re-export Text-to-Speech (TTS) and linguistic speech evaluation metrics
-from speck.tts_metrics import (
+from speck.tts_metrics import (  # noqa: E402
     MCD_FACTOR,
     TTSMetricsPipeline,
     compute_cer,

@@ -18,22 +18,19 @@ Comprehensive ML evaluation metrics for Speech Synthesis and Speech Recognition:
    - Language-specific text normalizers for English and Italian
 5. Latency & Efficiency:
    - Real-Time Factor (RTF)
-   - Time-To-First-Audio (TTFA)
-   - Latency percentiles
 6. Reporting & Pipeline:
    - TTSMetricsPipeline generating structured JSON and Markdown reports.
 """
 
 from __future__ import annotations
 
-import csv
 import json
 import logging
 import math
 import os
 import re
 import time
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import librosa
 import librosa.sequence
@@ -47,82 +44,45 @@ logger = logging.getLogger(__name__)
 # Scaling factor for Mel-Cepstral Distortion in dB: (10 * sqrt(2)) / ln(10)
 MCD_FACTOR = (10.0 * math.sqrt(2.0)) / math.log(10.0)  # ~6.14185
 
+AudioLike = Union[str, np.ndarray]
+
+
+def _load_audio(audio: AudioLike, sample_rate: int) -> np.ndarray:
+    """Mono float32 samples from a path (resampled to `sample_rate`) or an array."""
+    if isinstance(audio, str):
+        return librosa.load(audio, sr=sample_rate, mono=True)[0]
+    return to_mono_float32(audio)
+
 
 # ==============================================================================
 # 1. TEXT NORMALIZATION & LINGUISTIC PROCESSING (ENGLISH & ITALIAN)
 # ==============================================================================
 
-# English contractions map
-_EN_CONTRACTIONS: dict[str, str] = {
-    "won't": "will not",
-    "can't": "cannot",
-    "shan't": "shall not",
-    "let's": "let us",
-    "it's": "it is",
-    "that's": "that is",
-    "what's": "what is",
-    "there's": "there is",
-    "here's": "here is",
-    "who's": "who is",
-    "i'm": "i am",
-    "you're": "you are",
-    "we're": "we are",
-    "they're": "they are",
-    "he's": "he is",
-    "she's": "she is",
-    "i've": "i have",
-    "you've": "you have",
-    "we've": "we have",
-    "they've": "they have",
-    "i'll": "i will",
-    "you'll": "you will",
-    "he'll": "he will",
-    "she'll": "she will",
-    "we'll": "we will",
-    "they'll": "they will",
-    "i'd": "i would",
-    "you'd": "you would",
-    "he'd": "he would",
-    "she'd": "she would",
-    "we'd": "we would",
-    "they'd": "they would",
-    "didn't": "did not",
-    "doesn't": "does not",
-    "don't": "do not",
-    "haven't": "have not",
-    "hasn't": "has not",
-    "hadn't": "had not",
-    "aren't": "are not",
-    "isn't": "is not",
-    "wasn't": "was not",
-    "weren't": "were not",
-    "couldn't": "could not",
-    "shouldn't": "should not",
-    "wouldn't": "would not",
-}
+_QUOTES = re.compile(r"[’‘`´]")
+_SPACES = re.compile(r"\s+")
+
+# Irregular contractions; every regular one ("don't", "we're", "i'd", "he's"...) is covered by _EN_CLITICS
+_EN_IRREGULAR = [(re.compile(rf"\b{re.escape(c)}\b"), e) for c, e in (
+    ("won't", "will not"), ("can't", "cannot"), ("shan't", "shall not"), ("let's", "let us"),
+)]
+_EN_CLITICS = [(re.compile(rf"{c}\b"), e) for c, e in (
+    ("n't", " not"), ("'re", " are"), ("'ve", " have"), ("'ll", " will"), ("'d", " would"), ("'m", " am"), ("'s", " is"),
+)]
+_EN_THOUSANDS = re.compile(r"(?<=\d),(?=\d{3}\b)")  # 1,000 -> 1000
+_EN_NON_ALNUM = re.compile(r"[^a-z0-9\s]")
 
 # Italian common elided particles with apostrophe
 _IT_ELISIONS_REGEX = re.compile(
     r"\b(l|un|all|dall|dell|nell|sull|coll|pel|d|c|m|t|s|v|ci|vi|ne|quell|bell|grand|sant|poc|mezz|qualch)'([a-zàèéìòùA-Z])",
     re.IGNORECASE,
 )
-
+_IT_INNER_APOSTROPHE = re.compile(r"([a-zàèéìòù])'([a-zàèéìòù])")
+_IT_TYPOGRAPHY = re.compile(r"[«»“”\"„–—]")
+_IT_NON_ALNUM = re.compile(r"[^a-zàèéìòù0-9'\s]")
+_IT_NON_ASCII = re.compile(r"[^a-z0-9'\s]")
+_IT_STRAY_APOSTROPHES = (re.compile(r"\s+'+\s+"), re.compile(r"^'+|'+$"))
 # Italian accented characters mapping for diacritic-insensitive evaluation
-_IT_ACCENT_MAP = str.maketrans({
-    "à": "a",
-    "è": "e",
-    "é": "e",
-    "ì": "i",
-    "ò": "o",
-    "ó": "o",
-    "ù": "u",
-})
-
-
-def _standardize_quotes(text: str) -> str:
-    """Normalize curly quotes, backticks, and typographic apostrophes to standard single quotes."""
-    return re.sub(r"[’‘`´]", "'", text)
-
+_IT_ACCENT_MAP = str.maketrans("àèéìòóù", "aeeioou")
 
 # Hesitation sounds that references never transcribe but ASR models often emit
 _EN_FILLERS = frozenset({"uh", "um", "uhm", "umm", "erm", "hmm", "hm", "mm", "mmm", "mhm"})
@@ -200,6 +160,10 @@ def spoken_numbers_to_digits(text: str) -> str:
     return " ".join(out)
 
 
+def _drop(text: str, words: frozenset) -> str:
+    return " ".join(w for w in text.split() if w not in words)
+
+
 def normalize_english_text(
     text: str,
     expand_contractions: bool = True,
@@ -218,32 +182,14 @@ def normalize_english_text(
     """
     if not text:
         return ""
-
-    t = _standardize_quotes(text).lower()
-    t = re.sub(r"(?<=\d),(?=\d{3}\b)", "", t)  # 1,000 -> 1000
-    t = t.replace("%", " percent ")
-
+    t = _EN_THOUSANDS.sub("", _QUOTES.sub("'", text).lower()).replace("%", " percent ")
     if expand_contractions:
-        # Match word contractions
-        for contraction, expanded in _EN_CONTRACTIONS.items():
-            t = re.sub(rf"\b{re.escape(contraction)}\b", expanded, t)
-        # Match generic trailing clitics like n't, 're, 've, 'll, 'd
-        t = re.sub(r"n't\b", " not", t)
-        t = re.sub(r"'re\b", " are", t)
-        t = re.sub(r"'ve\b", " have", t)
-        t = re.sub(r"'ll\b", " will", t)
-        t = re.sub(r"'d\b", " would", t)
-        t = re.sub(r"'m\b", " am", t)
-        t = re.sub(r"'s\b", " is", t)
-
-    # Strip remaining punctuation and special characters
-    t = re.sub(r"[^a-z0-9\s]", " ", t)
-    t = re.sub(r"\s+", " ", t).strip()
+        for pattern, expanded in _EN_IRREGULAR + _EN_CLITICS:
+            t = pattern.sub(expanded, t)
+    t = _SPACES.sub(" ", _EN_NON_ALNUM.sub(" ", t)).strip()
     if strip_fillers:
-        t = " ".join(w for w in t.split() if w not in _EN_FILLERS)
-    if normalize_numbers:
-        t = spoken_numbers_to_digits(t)
-    return t
+        t = _drop(t, _EN_FILLERS)
+    return spoken_numbers_to_digits(t) if normalize_numbers else t
 
 
 def normalize_italian_text(
@@ -266,34 +212,13 @@ def normalize_italian_text(
     """
     if not text:
         return ""
-
-    t = _standardize_quotes(text).lower()
-
-    # Normalize typographic Italian quotes and dashes
-    t = re.sub(r"[«»“”\"„]", " ", t)
-    t = re.sub(r"[–—]", " ", t)
-
-    # Handle Italian apostrophe elisions: e.g. "l'arte" -> "l' arte" or "c'è" -> "c' è"
-    if split_apostrophes:
-        # Split "l'amico" -> "l' amico"
-        t = _IT_ELISIONS_REGEX.sub(r"\1' \2", t)
-        # Any remaining word-internal apostrophe: e.g. "d'accordo" -> "d' accordo"
-        t = re.sub(r"([a-zàèéìòù])'([a-zàèéìòù])", r"\1' \2", t)
-
-    if preserve_accents:
-        # Allow Italian accented vowels: à, è, é, ì, ò, ù
-        t = re.sub(r"[^a-zàèéìòù0-9'\s]", " ", t)
-    else:
-        t = t.translate(_IT_ACCENT_MAP)
-        t = re.sub(r"[^a-z0-9'\s]", " ", t)
-
-    # Remove stray standalone apostrophes
-    t = re.sub(r"\s+'+\s+", " ", t)
-    t = re.sub(r"^'+|'+$", "", t)
-    t = re.sub(r"\s+", " ", t).strip()
-    if strip_fillers:
-        t = " ".join(w for w in t.split() if w not in _IT_FILLERS)
-    return t
+    t = _IT_TYPOGRAPHY.sub(" ", _QUOTES.sub("'", text).lower())
+    if split_apostrophes:  # "l'amico" -> "l' amico", then any word-internal one: "d'accordo" -> "d' accordo"
+        t = _IT_INNER_APOSTROPHE.sub(r"\1' \2", _IT_ELISIONS_REGEX.sub(r"\1' \2", t))
+    t = _IT_NON_ALNUM.sub(" ", t) if preserve_accents else _IT_NON_ASCII.sub(" ", t.translate(_IT_ACCENT_MAP))
+    stray_inner, stray_edge = _IT_STRAY_APOSTROPHES
+    t = _SPACES.sub(" ", stray_edge.sub("", stray_inner.sub(" ", t))).strip()
+    return _drop(t, _IT_FILLERS) if strip_fillers else t
 
 
 def normalize_text(
@@ -305,8 +230,7 @@ def normalize_text(
     Language-aware text normalizer dispatcher.
     Supports "en", "en-US", "en-GB", "it", "it-IT", etc.
     """
-    lang_prefix = (language or "en").lower().split("-")[0].split("_")[0]
-    if lang_prefix == "it":
+    if (language or "en").lower().split("-")[0].split("_")[0] == "it":
         return normalize_italian_text(text, preserve_accents=preserve_accents)
     return normalize_english_text(text)
 
@@ -326,56 +250,44 @@ def _levenshtein_align(
     where aligned_operations is a list of tuples: (operation, ref_item, hyp_item)
     operation is one of: "equal", "substitute", "delete", "insert".
     """
-    n = len(ref_seq)
-    m = len(hyp_seq)
-
-    # dp[i][j] stores minimum edit operations
-    dp = np.zeros((n + 1, m + 1), dtype=np.int32)
-    for i in range(n + 1):
-        dp[i][0] = i
-    for j in range(m + 1):
-        dp[0][j] = j
-
+    n, m = len(ref_seq), len(hyp_seq)
+    # Plain lists: per-element access is several times faster than numpy scalar indexing
+    dp = [list(range(m + 1))] + [[i] + [0] * m for i in range(1, n + 1)]
     for i in range(1, n + 1):
+        row, up, r = dp[i], dp[i - 1], ref_seq[i - 1]
         for j in range(1, m + 1):
-            if ref_seq[i - 1] == hyp_seq[j - 1]:
-                dp[i][j] = dp[i - 1][j - 1]
-            else:
-                sub_cost = dp[i - 1][j - 1] + 1
-                del_cost = dp[i - 1][j] + 1
-                ins_cost = dp[i][j - 1] + 1
-                dp[i][j] = min(sub_cost, del_cost, ins_cost)
+            row[j] = up[j - 1] if r == hyp_seq[j - 1] else 1 + min(up[j - 1], up[j], row[j - 1])
 
     # Backtracking to reconstruct exact alignment path
     i, j = n, m
     ops: List[Tuple[str, Any, Any]] = []
-    substitutions = 0
-    deletions = 0
-    insertions = 0
-    hits = 0
-
+    counts = {"equal": 0, "substitute": 0, "delete": 0, "insert": 0}
     while i > 0 or j > 0:
         if i > 0 and j > 0 and ref_seq[i - 1] == hyp_seq[j - 1]:
-            ops.append(("equal", ref_seq[i - 1], hyp_seq[j - 1]))
-            hits += 1
-            i -= 1
-            j -= 1
+            op, i, j = ("equal", ref_seq[i - 1], hyp_seq[j - 1]), i - 1, j - 1
         elif i > 0 and j > 0 and dp[i][j] == dp[i - 1][j - 1] + 1:
-            ops.append(("substitute", ref_seq[i - 1], hyp_seq[j - 1]))
-            substitutions += 1
-            i -= 1
-            j -= 1
+            op, i, j = ("substitute", ref_seq[i - 1], hyp_seq[j - 1]), i - 1, j - 1
         elif i > 0 and dp[i][j] == dp[i - 1][j] + 1:
-            ops.append(("delete", ref_seq[i - 1], None))
-            deletions += 1
-            i -= 1
+            op, i = ("delete", ref_seq[i - 1], None), i - 1
         else:
-            ops.append(("insert", None, hyp_seq[j - 1]))
-            insertions += 1
-            j -= 1
+            op, j = ("insert", None, hyp_seq[j - 1]), j - 1
+        ops.append(op)
+        counts[op[0]] += 1
 
     ops.reverse()
-    return substitutions, deletions, insertions, hits, ops
+    return counts["substitute"], counts["delete"], counts["insert"], counts["equal"], ops
+
+
+def _edit_rate(reference, hypothesis, language, normalize, preserve_accents, tokenize):
+    """(normalized ref, normalized hyp, ref tokens, hyp tokens, error rate, (S, D, I, H, ops))."""
+    ref, hyp = (
+        normalize_text(t, language=language, preserve_accents=preserve_accents) if normalize else t
+        for t in (reference, hypothesis)
+    )
+    ref_tokens, hyp_tokens = tokenize(ref), tokenize(hyp)
+    s, d, i, h, ops = _levenshtein_align(ref_tokens, hyp_tokens)
+    rate = float((s + d + i) / len(ref_tokens)) if ref_tokens else float(bool(hyp_tokens))
+    return ref, hyp, ref_tokens, hyp_tokens, rate, (s, d, i, h, ops)
 
 
 def compute_wer(
@@ -389,42 +301,9 @@ def compute_wer(
     Computes Word Error Rate (WER):
         WER = (Substitutions + Deletions + Insertions) / Reference Word Count
     """
-    ref_clean = normalize_text(reference, language=language, preserve_accents=preserve_accents) if normalize else reference
-    hyp_clean = normalize_text(hypothesis, language=language, preserve_accents=preserve_accents) if normalize else hypothesis
-
-    ref_words = ref_clean.split()
-    hyp_words = hyp_clean.split()
-
-    if len(ref_words) == 0:
-        if len(hyp_words) == 0:
-            return {
-                "wer": 0.0,
-                "substitutions": 0,
-                "deletions": 0,
-                "insertions": 0,
-                "hits": 0,
-                "ref_words": 0,
-                "hyp_words": 0,
-                "alignment": [],
-                "normalized_ref": ref_clean,
-                "normalized_hyp": hyp_clean,
-            }
-        return {
-            "wer": 1.0,
-            "substitutions": 0,
-            "deletions": 0,
-            "insertions": len(hyp_words),
-            "hits": 0,
-            "ref_words": 0,
-            "hyp_words": len(hyp_words),
-            "alignment": [("insert", None, w) for w in hyp_words],
-            "normalized_ref": ref_clean,
-            "normalized_hyp": hyp_clean,
-        }
-
-    s, d, i, h, ops = _levenshtein_align(ref_words, hyp_words)
-    wer = float((s + d + i) / len(ref_words))
-
+    ref, hyp, ref_words, hyp_words, wer, (s, d, i, h, ops) = _edit_rate(
+        reference, hypothesis, language, normalize, preserve_accents, str.split
+    )
     return {
         "wer": wer,
         "substitutions": s,
@@ -434,8 +313,8 @@ def compute_wer(
         "ref_words": len(ref_words),
         "hyp_words": len(hyp_words),
         "alignment": ops,
-        "normalized_ref": ref_clean,
-        "normalized_hyp": hyp_clean,
+        "normalized_ref": ref,
+        "normalized_hyp": hyp,
     }
 
 
@@ -450,27 +329,9 @@ def compute_cer(
     Computes Character Error Rate (CER):
         CER = (Char Substitutions + Deletions + Insertions) / Reference Character Count
     """
-    ref_clean = normalize_text(reference, language=language, preserve_accents=preserve_accents) if normalize else reference
-    hyp_clean = normalize_text(hypothesis, language=language, preserve_accents=preserve_accents) if normalize else hypothesis
-
-    ref_chars = list(ref_clean.replace(" ", ""))
-    hyp_chars = list(hyp_clean.replace(" ", ""))
-
-    if len(ref_chars) == 0:
-        cer = 0.0 if len(hyp_chars) == 0 else 1.0
-        return {
-            "cer": cer,
-            "substitutions": 0,
-            "deletions": 0,
-            "insertions": len(hyp_chars),
-            "hits": 0,
-            "ref_chars": 0,
-            "hyp_chars": len(hyp_chars),
-        }
-
-    s, d, i, h, ops = _levenshtein_align(ref_chars, hyp_chars)
-    cer = float((s + d + i) / len(ref_chars))
-
+    _, _, ref_chars, hyp_chars, cer, (s, d, i, h, _) = _edit_rate(
+        reference, hypothesis, language, normalize, preserve_accents, lambda t: list(t.replace(" ", ""))
+    )
     return {
         "cer": cer,
         "substitutions": s,
@@ -480,6 +341,17 @@ def compute_cer(
         "ref_chars": len(ref_chars),
         "hyp_chars": len(hyp_chars),
     }
+
+
+def _information_rates(wer_res: Dict[str, Any]) -> Dict[str, float]:
+    errors = wer_res["substitutions"] + wer_res["deletions"] + wer_res["insertions"]
+    total_ops = errors + wer_res["hits"]
+    n_ref, n_hyp = wer_res["ref_words"], wer_res["hyp_words"]
+    if n_ref == 0 or n_hyp == 0:
+        wip = 1.0 if n_ref == n_hyp else 0.0
+    else:
+        wip = min(1.0, float(wer_res["hits"] ** 2 / (n_ref * n_hyp)))
+    return {"mer": float(errors / total_ops) if total_ops > 0 else 0.0, "wil": float(1.0 - wip), "wip": wip}
 
 
 def compute_mer_and_wil(
@@ -494,30 +366,7 @@ def compute_mer_and_wil(
         WIP = (H^2) / (N_ref * N_hyp)
         WIL = 1 - WIP
     """
-    wer_res = compute_wer(reference, hypothesis, language=language, normalize=normalize)
-    s = wer_res["substitutions"]
-    d = wer_res["deletions"]
-    i = wer_res["insertions"]
-    h = wer_res["hits"]
-    n_ref = wer_res["ref_words"]
-    n_hyp = wer_res["hyp_words"]
-
-    total_ops = s + d + i + h
-    mer = float((s + d + i) / total_ops) if total_ops > 0 else 0.0
-
-    if n_ref == 0 or n_hyp == 0:
-        wip = 1.0 if (n_ref == 0 and n_hyp == 0) else 0.0
-    else:
-        wip = float((h * h) / (n_ref * n_hyp))
-
-    wip = max(0.0, min(1.0, wip))
-    wil = float(1.0 - wip)
-
-    return {
-        "mer": mer,
-        "wil": wil,
-        "wip": wip,
-    }
+    return _information_rates(compute_wer(reference, hypothesis, language=language, normalize=normalize))
 
 
 def compute_speech_text_metrics(
@@ -532,15 +381,11 @@ def compute_speech_text_metrics(
     """
     wer_res = compute_wer(reference_text, hypothesis_text, language=language, preserve_accents=preserve_accents)
     cer_res = compute_cer(reference_text, hypothesis_text, language=language, preserve_accents=preserve_accents)
-    info_res = compute_mer_and_wil(reference_text, hypothesis_text, language=language)
-
     return {
         "language": language,
         "wer": wer_res["wer"],
         "cer": cer_res["cer"],
-        "mer": info_res["mer"],
-        "wil": info_res["wil"],
-        "wip": info_res["wip"],
+        **_information_rates(wer_res),  # reuses the WER alignment instead of recomputing it
         "substitutions": wer_res["substitutions"],
         "deletions": wer_res["deletions"],
         "insertions": wer_res["insertions"],
@@ -559,7 +404,7 @@ def compute_speech_text_metrics(
 # ==============================================================================
 
 def _extract_mcep(
-    audio: Union[str, np.ndarray],
+    audio: AudioLike,
     sample_rate: int = 16000,
     n_mels: int = 80,
     n_mfcc: int = 16,
@@ -575,51 +420,26 @@ def _extract_mcep(
     - Orthogonal DCT scaled by 1/sqrt(n_mels) to preserve L2 norm in cepstral space
     - Excludes c0 (energy coefficient)
     """
-    if isinstance(audio, str):
-        wav, sr = librosa.load(audio, sr=sample_rate, mono=True)
-    else:
-        wav = to_mono_float32(audio)
-        sr = sample_rate
+    wav = _load_audio(audio, sample_rate)
+    first = 1 if exclude_c0 else 0
 
     # Guard against completely silent / empty signals
-    if len(wav) == 0 or np.all(wav == 0.0) or np.std(wav) < 1e-7:
-        frames = max(1, len(wav) // hop_length)
-        dim = (n_mfcc - 1) if exclude_c0 else n_mfcc
-        return np.zeros((dim, frames), dtype=np.float32)
+    if len(wav) == 0 or np.std(wav) < 1e-7:
+        return np.zeros((n_mfcc - first, max(1, len(wav) // hop_length)), dtype=np.float32)
 
-    # Mel-spectrogram
-    S = librosa.feature.melspectrogram(
-        y=wav,
-        sr=sr,
-        n_fft=n_fft,
-        hop_length=hop_length,
-        n_mels=n_mels,
-        power=1.0,
-    )
+    S = librosa.feature.melspectrogram(y=wav, sr=sample_rate, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels, power=1.0)
     # Normalize per frame to eliminate global volume/gain variations (isolates timbre/spectral envelope)
-    frame_energy = np.sum(S, axis=0, keepdims=True)
-    S = S / np.maximum(frame_energy, 1e-8)
-
+    S = S / np.maximum(np.sum(S, axis=0, keepdims=True), 1e-8)
     # Floor at 80 dB dynamic range to prevent log divergence in silent frequency bands
     peak = float(np.max(S)) if np.max(S) > 0 else 1.0
-    floor = peak * 1e-4
-    log_S = np.log(np.maximum(S, floor))
-
-    # Orthogonal Discrete Cosine Transform
-    m = S.shape[0]
-    cep = dct(log_S, type=2, axis=0, norm="ortho") / np.sqrt(m)
-
-    if exclude_c0:
-        cep = cep[1:n_mfcc]
-    else:
-        cep = cep[:n_mfcc]
-
-    return cep.astype(np.float32)
+    log_S = np.log(np.maximum(S, peak * 1e-4))
+    cep = dct(log_S, type=2, axis=0, norm="ortho") / np.sqrt(S.shape[0])
+    return cep[first:n_mfcc].astype(np.float32)
 
 
 def compute_mcd(
-    ref_audio: Union[str, np.ndarray],
-    syn_audio: Union[str, np.ndarray],
+    ref_audio: AudioLike,
+    syn_audio: AudioLike,
     sample_rate: int = 16000,
     n_mels: int = 80,
     n_mfcc: int = 16,
@@ -639,22 +459,11 @@ def compute_mcd(
     """
     mcep_ref = _extract_mcep(ref_audio, sample_rate, n_mels, n_mfcc, hop_length, n_fft, exclude_c0)
     mcep_syn = _extract_mcep(syn_audio, sample_rate, n_mels, n_mfcc, hop_length, n_fft, exclude_c0)
-
-    # Identical matrix check
     if mcep_ref.shape == mcep_syn.shape and np.allclose(mcep_ref, mcep_syn, atol=1e-5):
         return 0.0
-
-    # DTW alignment between MFCC frames
     _, wp = librosa.sequence.dtw(X=mcep_ref, Y=mcep_syn, metric="euclidean")
-
-    # Aligned difference vectors
-    aligned_ref = mcep_ref[:, wp[:, 0]]
-    aligned_syn = mcep_syn[:, wp[:, 1]]
-    diff = aligned_ref - aligned_syn
-
-    frame_euclidean_dists = np.sqrt(np.sum(diff ** 2, axis=0))
-    mcd = float(MCD_FACTOR * np.mean(frame_euclidean_dists))
-    return float(mcd)
+    diff = mcep_ref[:, wp[:, 0]] - mcep_syn[:, wp[:, 1]]
+    return float(MCD_FACTOR * np.mean(np.sqrt(np.sum(diff ** 2, axis=0))))
 
 
 # ==============================================================================
@@ -673,26 +482,30 @@ def _extract_f0(
     max_rms = float(np.max(rms)) if len(rms) > 0 else 0.0
     if max_rms < 1e-4:
         return np.zeros(len(rms), dtype=np.float32)
-
     try:
         f0 = librosa.yin(wav, fmin=fmin, fmax=fmax, sr=sample_rate, hop_length=hop_length)
     except Exception:
         return np.zeros(len(rms), dtype=np.float32)
 
     f0 = np.nan_to_num(f0, nan=0.0, posinf=0.0, neginf=0.0)
-    min_len = min(len(rms), len(f0))
-    rms = rms[:min_len]
-    f0 = f0[:min_len]
-
+    n = min(len(rms), len(f0))
+    rms, f0 = rms[:n], f0[:n]
     # Voicing condition: frame energy above noise floor and within valid human pitch bounds
     is_voiced = (rms > 0.02 * max_rms) & (rms > 1e-4) & (f0 > fmin + 1.0) & (f0 < fmax - 1.0)
     f0[~is_voiced] = 0.0
     return f0.astype(np.float32)
 
 
+def _f0_result(frames: int = 0, voiced: int = 0, **values: float) -> Dict[str, Any]:
+    return {
+        "f0_rmse_hz": 0.0, "f0_rmse_cents": 0.0, "f0_pcc": 0.0, "vde": 0.0, "gpe": 0.0,
+        **values, "total_aligned_frames": frames, "mutually_voiced_frames": voiced,
+    }
+
+
 def compute_f0_metrics(
-    ref_audio: Union[str, np.ndarray],
-    syn_audio: Union[str, np.ndarray],
+    ref_audio: AudioLike,
+    syn_audio: AudioLike,
     sample_rate: int = 16000,
     fmin: float = 50.0,
     fmax: float = 500.0,
@@ -707,124 +520,67 @@ def compute_f0_metrics(
     - VDE: Voicing Decision Error (fraction of frames with voiced/unvoiced mismatch)
     - GPE: Gross Pitch Error (fraction of voiced frames with relative error > 20%)
     """
-    if isinstance(ref_audio, str):
-        wav_ref, _ = librosa.load(ref_audio, sr=sample_rate, mono=True)
-    else:
-        wav_ref = to_mono_float32(ref_audio)
-
-    if isinstance(syn_audio, str):
-        wav_syn, _ = librosa.load(syn_audio, sr=sample_rate, mono=True)
-    else:
-        wav_syn = to_mono_float32(syn_audio)
-
-    # Identical signal check
+    wav_ref, wav_syn = _load_audio(ref_audio, sample_rate), _load_audio(syn_audio, sample_rate)
     if len(wav_ref) == len(wav_syn) and np.allclose(wav_ref, wav_syn, atol=1e-5):
-        return {
-            "f0_rmse_hz": 0.0,
-            "f0_rmse_cents": 0.0,
-            "f0_pcc": 1.0,
-            "vde": 0.0,
-            "gpe": 0.0,
-            "total_aligned_frames": len(wav_ref) // hop_length,
-            "mutually_voiced_frames": len(wav_ref) // hop_length,
-        }
+        frames = len(wav_ref) // hop_length
+        return _f0_result(frames, frames, f0_pcc=1.0)
 
-    # Extract pitch with energy-gated voicing
     f0_ref = _extract_f0(wav_ref, sample_rate=sample_rate, hop_length=hop_length, fmin=fmin, fmax=fmax)
     f0_syn = _extract_f0(wav_syn, sample_rate=sample_rate, hop_length=hop_length, fmin=fmin, fmax=fmax)
-
     # Alignment via MCEP DTW
     mcep_ref = _extract_mcep(wav_ref, sample_rate=sample_rate, hop_length=hop_length, n_fft=n_fft)
     mcep_syn = _extract_mcep(wav_syn, sample_rate=sample_rate, hop_length=hop_length, n_fft=n_fft)
+    n_ref, n_syn = min(mcep_ref.shape[1], len(f0_ref)), min(mcep_syn.shape[1], len(f0_syn))
+    if n_ref == 0 or n_syn == 0:
+        return _f0_result()
 
-    min_len_ref = min(mcep_ref.shape[1], len(f0_ref))
-    min_len_syn = min(mcep_syn.shape[1], len(f0_syn))
-    mcep_ref = mcep_ref[:, :min_len_ref]
-    mcep_syn = mcep_syn[:, :min_len_syn]
-    f0_ref = f0_ref[:min_len_ref]
-    f0_syn = f0_syn[:min_len_syn]
-
-    if min_len_ref == 0 or min_len_syn == 0:
-        return {
-            "f0_rmse_hz": 0.0,
-            "f0_rmse_cents": 0.0,
-            "f0_pcc": 0.0,
-            "vde": 0.0,
-            "gpe": 0.0,
-            "total_aligned_frames": 0,
-            "mutually_voiced_frames": 0,
-        }
-
-    _, wp = librosa.sequence.dtw(X=mcep_ref, Y=mcep_syn, metric="euclidean")
-
-    f0_ref_aligned = f0_ref[wp[:, 0]]
-    f0_syn_aligned = f0_syn[wp[:, 1]]
+    _, wp = librosa.sequence.dtw(X=mcep_ref[:, :n_ref], Y=mcep_syn[:, :n_syn], metric="euclidean")
+    f0_ref_aligned, f0_syn_aligned = f0_ref[:n_ref][wp[:, 0]], f0_syn[:n_syn][wp[:, 1]]
     total_frames = len(wp)
 
     # Voicing decisions (voiced when F0 > 0)
-    voiced_ref = f0_ref_aligned > 0.0
-    voiced_syn = f0_syn_aligned > 0.0
+    voiced_ref, voiced_syn = f0_ref_aligned > 0.0, f0_syn_aligned > 0.0
     both_voiced = voiced_ref & voiced_syn
-    voicing_mismatch = voiced_ref ^ voiced_syn
+    vde = float(np.sum(voiced_ref ^ voiced_syn) / total_frames) if total_frames > 0 else 0.0
+    voiced_count = int(np.sum(both_voiced))
+    if voiced_count == 0:
+        return _f0_result(total_frames, vde=vde)
 
-    vde = float(np.sum(voicing_mismatch) / total_frames) if total_frames > 0 else 0.0
-    mutually_voiced_count = int(np.sum(both_voiced))
-
-    if mutually_voiced_count == 0:
-        return {
-            "f0_rmse_hz": 0.0,
-            "f0_rmse_cents": 0.0,
-            "f0_pcc": 0.0,
-            "vde": vde,
-            "gpe": 0.0,
-            "total_aligned_frames": total_frames,
-            "mutually_voiced_frames": 0,
-        }
-
-    v_ref = f0_ref_aligned[both_voiced]
-    v_syn = f0_syn_aligned[both_voiced]
-
-    # F0-RMSE (Hz)
-    f0_rmse_hz = float(np.sqrt(np.mean((v_ref - v_syn) ** 2)))
-
-    # F0-RMSE in musical cents: 1200 * log2(syn / ref)
-    ratio = np.clip(v_syn / np.maximum(v_ref, 1e-6), 1e-3, 1e3)
-    cents_diff = 1200.0 * np.log2(ratio)
-    f0_rmse_cents = float(np.sqrt(np.mean(cents_diff ** 2)))
-
-    # Gross Pitch Error (GPE): percentage of voiced frames with relative error > 20%
+    v_ref, v_syn = f0_ref_aligned[both_voiced], f0_syn_aligned[both_voiced]
+    cents_diff = 1200.0 * np.log2(np.clip(v_syn / np.maximum(v_ref, 1e-6), 1e-3, 1e3))
     rel_error = np.abs(v_syn - v_ref) / np.maximum(v_ref, 1e-6)
-    gpe = float(np.mean(rel_error > 0.20))
 
     # Pearson Correlation Coefficient (PCC)
-    std_ref = np.std(v_ref)
-    std_syn = np.std(v_syn)
-    if std_ref < 1e-5 or std_syn < 1e-5:
-        # Constant pitch trajectory
+    std_ref, std_syn = np.std(v_ref), np.std(v_syn)
+    if std_ref < 1e-5 or std_syn < 1e-5:  # constant pitch trajectory
         f0_pcc = 1.0 if np.isclose(np.mean(v_ref), np.mean(v_syn), atol=1.0) else 0.0
     else:
         cov = np.mean((v_ref - np.mean(v_ref)) * (v_syn - np.mean(v_syn)))
-        f0_pcc = float(cov / (std_ref * std_syn))
-        f0_pcc = max(-1.0, min(1.0, f0_pcc))
+        f0_pcc = max(-1.0, min(1.0, float(cov / (std_ref * std_syn))))
 
-    return {
-        "f0_rmse_hz": f0_rmse_hz,
-        "f0_rmse_cents": f0_rmse_cents,
-        "f0_pcc": f0_pcc,
-        "vde": vde,
-        "gpe": gpe,
-        "total_aligned_frames": total_frames,
-        "mutually_voiced_frames": mutually_voiced_count,
-    }
+    return _f0_result(
+        total_frames,
+        voiced_count,
+        f0_rmse_hz=float(np.sqrt(np.mean((v_ref - v_syn) ** 2))),
+        f0_rmse_cents=float(np.sqrt(np.mean(cents_diff ** 2))),
+        f0_pcc=f0_pcc,
+        vde=vde,
+        gpe=float(np.mean(rel_error > 0.20)),  # share of voiced frames off by > 20%
+    )
 
 
 # ==============================================================================
 # 5. SPEAKER SIMILARITY & TIMBRE FIDELITY (SECS)
 # ==============================================================================
 
+def _cosine(a: np.ndarray, b: np.ndarray) -> float:
+    cos_sim = float(np.dot(a, b) / ((np.linalg.norm(a) + 1e-9) * (np.linalg.norm(b) + 1e-9)))
+    return max(-1.0, min(1.0, cos_sim))
+
+
 def compute_speaker_similarity(
-    ref_audio: Union[str, np.ndarray],
-    syn_audio: Union[str, np.ndarray],
+    ref_audio: AudioLike,
+    syn_audio: AudioLike,
     embedder: Optional[Any] = None,
     sample_rate: int = 16000,
 ) -> float:
@@ -832,16 +588,7 @@ def compute_speaker_similarity(
     Computes Speaker Embedding Cosine Similarity (SECS) between reference voice and synthesized voice.
     Returns cosine similarity in range [-1.0, 1.0].
     """
-    if isinstance(ref_audio, str):
-        wav_ref, _ = librosa.load(ref_audio, sr=sample_rate, mono=True)
-    else:
-        wav_ref = to_mono_float32(ref_audio)
-
-    if isinstance(syn_audio, str):
-        wav_syn, _ = librosa.load(syn_audio, sr=sample_rate, mono=True)
-    else:
-        wav_syn = to_mono_float32(syn_audio)
-
+    wav_ref, wav_syn = _load_audio(ref_audio, sample_rate), _load_audio(syn_audio, sample_rate)
     if len(wav_ref) == len(wav_syn) and np.allclose(wav_ref, wav_syn, atol=1e-5):
         return 1.0
 
@@ -851,27 +598,20 @@ def compute_speaker_similarity(
             embedder = SpeakerEmbedder(sample_rate=sample_rate)
         except Exception:
             pass
-
     if embedder is not None:
-        e_ref = embedder.embed(wav_ref)
-        e_syn = embedder.embed(wav_syn)
-        norm_ref = np.linalg.norm(e_ref) + 1e-9
-        norm_syn = np.linalg.norm(e_syn) + 1e-9
-        cos_sim = float(np.dot(e_ref, e_syn) / (norm_ref * norm_syn))
-        return max(-1.0, min(1.0, cos_sim))
+        return _cosine(embedder.embed(wav_ref), embedder.embed(wav_syn))
 
     # Acoustic spectral timbre fallback
-    m_ref = np.mean(_extract_mcep(wav_ref, sample_rate=sample_rate, n_mfcc=20), axis=1)
-    m_syn = np.mean(_extract_mcep(wav_syn, sample_rate=sample_rate, n_mfcc=20), axis=1)
-    norm_ref = np.linalg.norm(m_ref) + 1e-9
-    norm_syn = np.linalg.norm(m_syn) + 1e-9
-    cos_sim = float(np.dot(m_ref, m_syn) / (norm_ref * norm_syn))
-    return max(-1.0, min(1.0, cos_sim))
+    return _cosine(*(np.mean(_extract_mcep(w, sample_rate=sample_rate, n_mfcc=20), axis=1) for w in (wav_ref, wav_syn)))
 
 
 # ==============================================================================
 # 6. TTS EVALUATION PIPELINE & REPORT GENERATION
 # ==============================================================================
+
+def _mean(values: List[float], default: Optional[float] = 0.0) -> Optional[float]:
+    return float(np.mean(values)) if values else default
+
 
 class TTSMetricsPipeline:
     """
@@ -899,51 +639,46 @@ class TTSMetricsPipeline:
 
     def evaluate_sample(
         self,
-        ref_audio: Union[str, np.ndarray],
-        syn_audio: Union[str, np.ndarray],
+        ref_audio: AudioLike,
+        syn_audio: AudioLike,
         ref_text: str,
         asr_hypothesis_text: Optional[str] = None,
         language: str = "en",
         synthesis_time_sec: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Runs full suite of acoustic, prosodic, speaker, and linguistic tests on one utterance."""
-        if isinstance(syn_audio, str):
-            wav_syn, _ = librosa.load(syn_audio, sr=self.sample_rate, mono=True)
-        else:
-            wav_syn = to_mono_float32(syn_audio)
-
-        audio_duration = len(wav_syn) / self.sample_rate
-
-        # 1. Acoustic: Mel-Cepstral Distortion
-        mcd = compute_mcd(ref_audio, syn_audio, sample_rate=self.sample_rate)
-
-        # 2. Prosody: F0 Pitch Metrics
-        f0_metrics = compute_f0_metrics(ref_audio, syn_audio, sample_rate=self.sample_rate)
-
-        # 3. Speaker Timbre: SECS
-        secs = compute_speaker_similarity(ref_audio, syn_audio, embedder=self.embedder, sample_rate=self.sample_rate)
-
-        # 4. Linguistic Intelligibility: WER, CER, MER, WIL
-        if asr_hypothesis_text is not None:
-            text_metrics = compute_speech_text_metrics(
-                ref_text,
-                asr_hypothesis_text,
-                language=language,
-            )
-        else:
-            text_metrics = None
-
-        # 5. Efficiency: RTF
-        rtf = (synthesis_time_sec / audio_duration) if (synthesis_time_sec and audio_duration > 0) else None
-
+        sr = self.sample_rate
+        ref, syn = _load_audio(ref_audio, sr), _load_audio(syn_audio, sr)  # decode files once for all metrics
+        duration = len(syn) / sr
         return {
             "language": language,
-            "duration_sec": audio_duration,
-            "mcd_db": mcd,
-            "f0": f0_metrics,
-            "speaker_similarity_secs": secs,
-            "intelligibility": text_metrics,
-            "synthesis_rtf": rtf,
+            "duration_sec": duration,
+            "mcd_db": compute_mcd(ref, syn, sample_rate=sr),
+            "f0": compute_f0_metrics(ref, syn, sample_rate=sr),
+            "speaker_similarity_secs": compute_speaker_similarity(ref, syn, embedder=self.embedder, sample_rate=sr),
+            "intelligibility": (
+                compute_speech_text_metrics(ref_text, asr_hypothesis_text, language=language)
+                if asr_hypothesis_text is not None else None
+            ),
+            "synthesis_rtf": (synthesis_time_sec / duration) if (synthesis_time_sec and duration > 0) else None,
+        }
+
+    @staticmethod
+    def _summarize(group: List[Dict[str, Any]]) -> Dict[str, Any]:
+        voiced = [r["f0"] for r in group if r["f0"]["mutually_voiced_frames"] > 0]
+        texts = [r["intelligibility"] for r in group if r["intelligibility"] is not None]
+        mcds = [r["mcd_db"] for r in group]
+        return {
+            "count": len(group),
+            "mcd_db_mean": _mean(mcds),
+            "mcd_db_p95": float(np.percentile(mcds, 95)) if mcds else 0.0,
+            "speaker_similarity_mean": _mean([r["speaker_similarity_secs"] for r in group]),
+            "f0_rmse_hz_mean": _mean([f["f0_rmse_hz"] for f in voiced]),
+            "f0_pcc_mean": _mean([f["f0_pcc"] for f in voiced]),
+            "vde_mean": _mean([r["f0"]["vde"] for r in group]),
+            "wer_mean": _mean([t["wer"] for t in texts], None),
+            "cer_mean": _mean([t["cer"] for t in texts], None),
+            "rtf_mean": _mean([r["synthesis_rtf"] for r in group if r["synthesis_rtf"] is not None], None),
         }
 
     def evaluate_dataset(
@@ -960,12 +695,11 @@ class TTSMetricsPipeline:
         - "language": "en" or "it"
         - "synthesis_time_sec": (optional) synthesis time in seconds
         """
-        results_by_lang: Dict[str, List[Dict[str, Any]]] = {}
-        all_results: List[Dict[str, Any]] = []
-
+        by_lang: Dict[str, List[Dict[str, Any]]] = {}
+        results: List[Dict[str, Any]] = []
         for item in dataset:
             lang = item.get("language", "en").lower().split("-")[0]
-            eval_res = self.evaluate_sample(
+            res = self.evaluate_sample(
                 ref_audio=item["ref_audio"],
                 syn_audio=item["syn_audio"],
                 ref_text=item["text"],
@@ -973,47 +707,15 @@ class TTSMetricsPipeline:
                 language=lang,
                 synthesis_time_sec=item.get("synthesis_time_sec"),
             )
-            all_results.append(eval_res)
-            results_by_lang.setdefault(lang, []).append(eval_res)
+            results.append(res)
+            by_lang.setdefault(lang, []).append(res)
 
-        summary: Dict[str, Any] = {
-            "total_samples": len(all_results),
-            "languages": {},
-            "aggregate": {},
+        summary = {
+            "total_samples": len(results),
+            "languages": {lang: self._summarize(group) for lang, group in by_lang.items()},
+            "aggregate": self._summarize(results),
         }
-
-        def summarize_group(group: List[Dict[str, Any]]) -> Dict[str, Any]:
-            mcds = [r["mcd_db"] for r in group]
-            secs_list = [r["speaker_similarity_secs"] for r in group]
-            f0_rmses = [r["f0"]["f0_rmse_hz"] for r in group if r["f0"]["mutually_voiced_frames"] > 0]
-            f0_pccs = [r["f0"]["f0_pcc"] for r in group if r["f0"]["mutually_voiced_frames"] > 0]
-            vdes = [r["f0"]["vde"] for r in group]
-
-            wers = [r["intelligibility"]["wer"] for r in group if r["intelligibility"] is not None]
-            cers = [r["intelligibility"]["cer"] for r in group if r["intelligibility"] is not None]
-            rtfs = [r["synthesis_rtf"] for r in group if r["synthesis_rtf"] is not None]
-
-            return {
-                "count": len(group),
-                "mcd_db_mean": float(np.mean(mcds)) if mcds else 0.0,
-                "mcd_db_p95": float(np.percentile(mcds, 95)) if mcds else 0.0,
-                "speaker_similarity_mean": float(np.mean(secs_list)) if secs_list else 0.0,
-                "f0_rmse_hz_mean": float(np.mean(f0_rmses)) if f0_rmses else 0.0,
-                "f0_pcc_mean": float(np.mean(f0_pccs)) if f0_pccs else 0.0,
-                "vde_mean": float(np.mean(vdes)) if vdes else 0.0,
-                "wer_mean": float(np.mean(wers)) if wers else None,
-                "cer_mean": float(np.mean(cers)) if cers else None,
-                "rtf_mean": float(np.mean(rtfs)) if rtfs else None,
-            }
-
-        summary["aggregate"] = summarize_group(all_results)
-        for lang, group in results_by_lang.items():
-            summary["languages"][lang] = summarize_group(group)
-
-        return {
-            "summary": summary,
-            "individual_results": all_results,
-        }
+        return {"summary": summary, "individual_results": results}
 
     def export_reports(self, evaluation_output: Dict[str, Any]) -> Dict[str, str]:
         """Exports JSON summary and Markdown evaluation report for TTS benchmarks."""

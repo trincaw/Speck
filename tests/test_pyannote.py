@@ -2,8 +2,7 @@ import numpy as np
 import pytest
 from transformers.audio_utils import load_audio
 
-from speck.pyannote import PyannoteSpeakerRecognizer
-from src.streaming import RealTimeStreamingEngine
+from speck.pyannote import PyannoteSpeakerRecognizer, RealTimeStreamingEngine
 
 
 @pytest.fixture(scope="module")

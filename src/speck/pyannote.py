@@ -103,20 +103,15 @@ class PyannoteSpeakerRecognizer:
         """Query input audio against all enrolled profiles using Cosine similarity."""
         start = time.perf_counter()
         emb, _ = self.extract_embedding(audio)
-        scores: dict[str, float] = {}
-        for spk_id, spk_emb in self.database.items():
-            scores[spk_id] = float(np.dot(emb, spk_emb))
-        elapsed = time.perf_counter() - start
-        return scores, elapsed
+        scores = {spk_id: float(emb @ spk_emb) for spk_id, spk_emb in self.database.items()}
+        return scores, time.perf_counter() - start
 
     def verify(self, audio_ref: np.ndarray, audio_query: np.ndarray) -> tuple[float, float]:
         """Direct 1:1 pairwise verification score between two audio clips."""
         start = time.perf_counter()
         e_ref, _ = self.extract_embedding(audio_ref)
         e_query, _ = self.extract_embedding(audio_query)
-        elapsed = time.perf_counter() - start
-        score = float(np.dot(e_ref, e_query))
-        return score, elapsed
+        return float(e_ref @ e_query), time.perf_counter() - start
 
     def diarize(
         self,
@@ -158,22 +153,14 @@ class PyannoteSpeakerRecognizer:
             sd = sherpa_onnx.OfflineSpeakerDiarization(config)
             res = sd.process(wav)
 
-        turns: list[SpeakerTurn] = []
-        if res.num_segments == 0:
-            # Fallback for very short or unsegmented audio
-            if self.database:
-                scores, _ = self.match(wav)
-                best_spk = max(scores, key=scores.get) if scores else "Speaker 1"
-                best_score = scores.get(best_spk, 1.0)
-                turns.append(
-                    SpeakerTurn(0.0, duration, SpeakerMatch(best_spk, best_score, confident=True))
-                )
-            else:
-                turns.append(
-                    SpeakerTurn(0.0, duration, SpeakerMatch("Speaker 1", 1.0, is_new=True))
-                )
-            return turns
+        if res.num_segments == 0:  # very short or unsegmented audio: one turn
+            if not self.database:
+                return [SpeakerTurn(0.0, duration, SpeakerMatch("Speaker 1", 1.0, is_new=True))]
+            scores, _ = self.match(wav)
+            best_spk = max(scores, key=scores.get)
+            return [SpeakerTurn(0.0, duration, SpeakerMatch(best_spk, scores[best_spk]))]
 
+        turns: list[SpeakerTurn] = []
         for seg in res.sort_by_start_time():
             start_samp = int(seg.start * self.sr)
             end_samp = min(len(wav), int(seg.end * self.sr))
@@ -214,4 +201,38 @@ class PyannoteSpeakerRecognizer:
         return self.sr
 
 
-__all__ = ["PyannoteSpeakerRecognizer", "SpeakerMatch", "SpeakerTurn"]
+class RealTimeStreamingEngine:
+    """Live "who is speaking" over a rolling context window (e.g. 500 ms chunks, 1.5 s window)."""
+
+    def __init__(self, recognizer, sample_rate=16000, window_sec=1.5, chunk_sec=0.5, threshold=0.75):
+        self.recognizer = recognizer
+        self.sr = sample_rate
+        self.window_size = int(window_sec * sample_rate)
+        self.chunk_size = int(chunk_sec * sample_rate)
+        self.threshold = threshold
+        self.buffer = np.zeros(self.window_size, dtype=np.float32)
+
+    def reset(self) -> None:
+        self.buffer.fill(0.0)
+
+    def process_chunk(self, chunk) -> tuple[str, float, float, float]:
+        """Slide `chunk` into the window and match it. Returns (speaker, score, latency_s, rtf)."""
+        chunk = np.asarray(chunk, dtype=np.float32)[-self.window_size :]
+        n = len(chunk)
+        self.buffer[: self.window_size - n] = self.buffer[n:]  # in-place shift, no reallocation
+        self.buffer[self.window_size - n :] = chunk
+
+        start = time.perf_counter()
+        scores, _ = self.recognizer.match(self.buffer)
+        latency = time.perf_counter() - start
+
+        best_spk, best_score = "Unknown", 0.0
+        if scores:
+            best_spk = max(scores, key=scores.get)
+            best_score = scores[best_spk]
+            if best_score < self.threshold:
+                best_spk = "Unknown"
+        return best_spk, best_score, latency, latency / (n / self.sr)
+
+
+__all__ = ["PyannoteSpeakerRecognizer", "RealTimeStreamingEngine", "SpeakerMatch", "SpeakerTurn"]
