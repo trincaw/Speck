@@ -25,7 +25,7 @@ WHISPER_LANGUAGES = {
 
 
 class WhisperASR(BaseASREngine):
-    """OpenAI Whisper through faster-whisper. `model_id` is a size ('base', 'large-v3-turbo') or a CT2 repo."""
+    """OpenAI Whisper through faster-whisper. `model_id` is a size ('large-v3-turbo') or a CT2 repo."""
 
     def __init__(
         self,

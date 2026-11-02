@@ -9,11 +9,14 @@ Model-agnostic speech recognition with real-time streaming and live speaker labe
 ## Install
 
 ```bash
-pip install speck
+uv sync                 # or: pip install -e .
+uv run speck --help
 ```
 
-Installs the `speck` command and the Python library. Python 3.12+. Configure through environment variables
-(see [.env.example](.env.example)); the CLI loads a `.env` automatically, library users can call `speck.load_env_file()`.
+Installs the `speck` command and the Python library from this checkout (Python 3.12+). The `speck` name on PyPI is a different project. Configure through environment variables
+(see [.env.example](.env.example))
+Speaker embeddings (TitaNet-small) and the other ONNX models are fetched from HuggingFace on first use.
+Default models: Parakeet for ASR, Whisper large-v3-turbo and Nemotron (streaming) as alternatives, TitaNet-small for speakers ([benchmarks](docs/models_report.md)).
 
 ## CLI
 
@@ -33,10 +36,10 @@ Common flags (`speck <command> --help` for the rest):
 | Flag | Meaning |
 |---|---|
 | `--model NAME`, `--device cuda\|cpu` | Engine alias or checkpoint, and where to run it |
-| `--language CODE` | Locale like `en-US`, or `auto` (default) |
-| `--lookahead 0\|3\|6\|13` | Latency preset: 80 / 320 / 560 (default) / 1120 ms. Lower is faster, higher is more accurate |
-| `--speakers` | Label speakers (`mic`, `listen`, `mixed`) |
-| `--enroll NAME=WAV` | Known voice sample, repeatable |
+| `--language CODE` | Locale like `en-US`, or `auto`; default is `SPECK_LANGUAGE` (`auto`) |
+| `--lookahead 0\|3\|6\|13` | Latency preset: 80 / 320 / 560 (default) / 1120 ms. Lower is lower latency, higher is more accurate. Only Nemotron uses it; other engines ignore it |
+| `--speakers` | Label speakers (`mic`, `listen`; already on in `mixed`, `--no-speakers` turns it off) |
+| `--enroll NAME=WAV` | Known voice sample, repeatable (also on `speakers`) |
 | `--speaker-threshold X` | Match strictness, default 0.35. Raise if people get merged, lower if one is split |
 | `--num-speakers N` | Cap on speakers discovered |
 
@@ -47,7 +50,7 @@ speck listen --app discord --save-dir ~/transcripts     # --list shows playing a
 speck mixed --speakers --save call.txt                  # --me/--remote rename labels, --no-echo-guard with headphones
 ```
 
-`listen` and `mixed` need PulseAudio/PipeWire (`pactl`, `parec`).
+`listen` and `mixed` need PulseAudio/PipeWire (`pactl`, `parec`). `mixed` labels the microphone `[You]` and, with speakers on, remote voices `Speaker 1`, `Speaker 2`...; `[Remote]` is used only with `--no-speakers`.
 
 ## Library
 
@@ -66,26 +69,35 @@ session.push_audio(chunk)
 session.finish(); session.join()
 ```
 
-Add your own engine by subclassing `BaseASREngine` and calling `speck.factory.register_engine(alias, cls)`.
+Add your own engine by subclassing `BaseASREngine` and calling `speck.factory.register_engine(alias, cls)`. An unrecognized model string falls back to Parakeet.
 
 ## Lowering the error rate
+
+These settings can be activated to lower the error rate.
 
 | Setting (`.env`) | Effect |
 |---|---|
 | `SPECK_LANGUAGE=en` | Locks Whisper to one language (no identification pass, no false switches); also the CLI `--language` default |
 | `SPECK_HOTWORDS=Docker,Kubernetes` | Biases Whisper decoding and snaps near-miss words in every engine's output to this vocabulary |
-| `SPECK_BEAM_SIZE=5` | Whisper beam width |
+| `SPECK_BEAM_SIZE=5` | Whisper beam width (default 5) |
 | `SPECK_NORMALIZE_AUDIO=1` | DC removal and peak normalization of offline audio (`0` disables) |
 
-`speck.rover([text_a, text_b, text_c])` merges transcripts from several engines by word-level majority vote.
+`speck.rover([text_a, text_b, text_c])` merges transcripts from several engines by word-level majority vote (the first one is the pivot on ties).
 
-WER is computed on normalized text: punctuation, casing, hesitation fillers ("uh", "um") and number format
-("35" vs "thirty five") are ignored. Measure on a real set, not three clips:
+WER is computed on normalized text: punctuation, casing and hesitation fillers ("uh", "um") are ignored in English and
+Italian, and spelled-out numbers ("35" vs "thirty five") in English only (the script defaults to `--language en-US`). Measure on a real set, not three clips:
 
 ```bash
 python scripts/download_assets.py --librispeech test-clean          # ~1 h subset
-python scripts/asr_benchmark.py --models nemotron whisper-large-v3-turbo parakeet --ensemble
+python scripts/asr_benchmark.py --models parakeet whisper-large-v3-turbo nemotron --ensemble   # --ensemble needs 3+ models; writes reports/asr_benchmark.json
+python scripts/speaker_benchmark.py --models nemo_en_titanet_small.onnx nemo_en_titanet_large.onnx   # speaker-embedding EER; writes reports/speaker_benchmark.json
 ```
+
+## Speaker tool and benchmarks
+
+`main.py` is a separate speaker-recognition tool (pyannote segmentation-3.0 + TitaNet-small, the same embeddings as the live classifier used by the `speck` CLI):
+`enroll`, `identify`, `diarize`, `stream` and `evaluate`. Enrolled profiles live in memory only, and `main.py` pre-enrolls the first WAV of each `data/<speaker>/` folder.
+`scripts/` holds `download_assets.py`, `asr_benchmark.py` and `speaker_benchmark.py`.
 
 ## Tests
 
@@ -99,4 +111,4 @@ Read these before working on the related area:
 
 - [docs/metrics.md](docs/metrics.md): speaker and TTS evaluation pipelines (`main.py evaluate`), metrics, report files.
 - [docs/data_and_models.md](docs/data_and_models.md): downloading models and datasets, audio format, dataset layout.
-- [docs/models_report.md](docs/models_report.md): measured WER/RTF/EER per model; use it to choose a model.
+- [docs/models_report.md](docs/models_report.md): selected default models and their measured WER/RTF/EER, plus historic benchmarks of earlier runs and replaced models (kept as reference data).

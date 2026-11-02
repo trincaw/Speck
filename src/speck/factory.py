@@ -39,8 +39,6 @@ class EngineSpec:
         return requested if "/" in requested or requested in self.passthrough_ids else self.default_model_id
 
 
-_WHISPER_ALIASES = ("whisper-tiny", "whisper-base", "whisper-small", "whisper-medium", "whisper-large-v3", "whisper-large-v3-turbo")
-
 ENGINE_SPECS: list[EngineSpec] = [
     EngineSpec(
         id="nemotron",
@@ -67,12 +65,12 @@ ENGINE_SPECS: list[EngineSpec] = [
         id="whisper",
         cls=WhisperASR,
         default_model_id="large-v3-turbo",
-        aliases=("whisper", "faster-whisper", *_WHISPER_ALIASES),
+        aliases=("whisper", "faster-whisper", "whisper-large-v3-turbo"),
         name="Whisper (faster-whisper)",
         architecture="Transformer encoder-decoder (CTranslate2)",
         type="local_offline",
         description="Multilingual offline ASR with beam search, VAD filtering and hotword biasing.",
-        alias_model_ids=tuple((a, a.removeprefix("whisper-")) for a in _WHISPER_ALIASES),
+        alias_model_ids=(("whisper-large-v3-turbo", "large-v3-turbo"),),
     ),
     EngineSpec(
         id="parakeet",
@@ -148,8 +146,8 @@ def get_engine(
         return registered(model_id=requested, device=device, dtype=dtype, **kwargs)
 
     if spec is None:
-        logger.warning("Unrecognized model '%s'. Defaulting to Nemotron.", requested)
-        spec = ENGINE_SPECS[0]
+        logger.warning("Unrecognized model '%s'. Defaulting to Parakeet.", requested)
+        spec = _SPEC_BY_ID["parakeet"]
     return spec.cls(model_id=spec.model_id_for(requested), device=device, dtype=dtype, **kwargs)
 
 

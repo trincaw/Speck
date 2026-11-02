@@ -22,13 +22,13 @@ def build_parser():
     p = sub.add_parser("diarize", help="Diarize speakers in an audio file")
     p.add_argument("audio_path", help="Path to audio file")
     p.add_argument("--num-speakers", type=int, default=-1, help="Expected number of speakers (-1 for auto)")
-    p.add_argument("--threshold", type=float, default=0.5, help="Clustering threshold (default: 0.5)")
+    p.add_argument("--threshold", type=float, default=0.7, help="Clustering threshold (default: 0.7)")
 
     p = sub.add_parser("stream", help="Simulate real-time streaming recognition on an audio file")
     p.add_argument("audio_path", help="Path to query audio stream")
     p.add_argument("--chunk-ms", type=int, default=500, help="Chunk size in milliseconds (default: 500ms)")
     p.add_argument("--window-sec", type=float, default=1.5, help="Sliding context window in seconds (default: 1.5s)")
-    p.add_argument("--threshold", type=float, default=0.75, help="Confidence threshold (default: 0.75)")
+    p.add_argument("--threshold", type=float, default=0.35, help="Confidence threshold (default: 0.35)")
 
     p = sub.add_parser("evaluate", help="Run full metrics pipeline and export report")
     p.add_argument("--task", choices=["speaker", "tts", "all"], default="all", help="Evaluation benchmark suite (speaker, tts, all; default: all)")

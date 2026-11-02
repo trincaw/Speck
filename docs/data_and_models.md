@@ -7,11 +7,13 @@ python scripts/download_assets.py --all        # or --models / --data
 python scripts/download_assets.py --librispeech test-clean   # ASR WER set (~1 h)
 ```
 
-The pyannote segmentation and WeSpeaker embedding models are fetched from HuggingFace on first use. `--models` downloads `models/campplus_cn_en_common_200k.onnx`.
+The ONNX models are fetched from HuggingFace into the HF cache on first use: TitaNet-small (speaker embeddings for live labels, `main.py` and SECS), pyannote segmentation-3.0 (`main.py`) and Silero VAD. `--models` pre-fetches them, e.g. before going offline. Model choice and benchmarks: [models_report.md](models_report.md).
+
+`--data` fetches CMU Arctic (speakers `slt`, `bdl`, `clb`, utterances `arctic_a0001`-`a0005`) into `data/<speaker>/`. `--librispeech` downloads into `data/librispeech/<split>` and exits without doing `--models`/`--data`; `--chapter-step N` keeps 1 chapter in N (default 5).
 
 ## Audio format
 
-16 kHz, mono, 16-bit PCM WAV, at least 1 s (1.5-3 s recommended for enrollment). Convert with:
+16 kHz, mono WAV (speaker evaluation and `main.py` do not resample; the `speck` CLI resamples any file it loads). No minimum length is enforced; 1.5-3 s per utterance is recommended for enrollment. Convert with:
 
 ```bash
 ffmpeg -i in.mp3 -ar 16000 -ac 1 -c:a pcm_s16le data/alice/utterance_01.wav
@@ -25,7 +27,7 @@ data/
 └── speaker_2/{utterance_01,utterance_02}.wav
 ```
 
-One folder per identity, at least 2 utterances each (1 enrollment, 1+ queries).
+One folder per identity, at least 2 WAVs each (the first, in sorted order, is the enrollment, the rest are queries). `main.py` also pre-enrolls the first WAV of every `data/*/` folder on start, whatever `--data-dir` is; profiles are not saved between runs.
 
 ## Public corpora
 

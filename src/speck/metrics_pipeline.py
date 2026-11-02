@@ -132,7 +132,7 @@ class SpeakerMetricsPipeline:
         """
         Evaluates near real-time streaming performance using sliding window audio ingestion.
         """
-        engine = RealTimeStreamingEngine(self.recognizer, chunk_sec=chunk_sec, window_sec=window_sec, threshold=0.70)
+        engine = RealTimeStreamingEngine(self.recognizer, chunk_sec=chunk_sec, window_sec=window_sec)
         chunk_latencies, chunk_rtfs, time_to_detect = [], [], []
 
         for spk, files in test_dict.items():
@@ -185,7 +185,7 @@ class SpeakerMetricsPipeline:
         ident = results["identification"]
         stream = results["streaming"]
 
-        arch_name = getattr(self.recognizer, "architecture_name", "Pyannote.audio (pyannote/segmentation-3.0 + WeSpeaker ResNet34)")
+        arch_name = getattr(self.recognizer, "architecture_name", "Pyannote.audio (pyannote/segmentation-3.0 + TitaNet-small)")
         md_content = f"""# Speaker Recognition Evaluation Report
 
 **Generated on:** {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}  

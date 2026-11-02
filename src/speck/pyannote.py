@@ -1,8 +1,8 @@
 """Pyannote.audio speaker diarization and voice recognition provider for Speck.
 
 Integrates Pyannote.audio neural segmentation (pyannote/segmentation-3.0) and
-WeSpeaker ResNet34 speaker voice embeddings (the official voice recognition
-backbone of pyannote.audio 3.x) for speaker verification, closed-set identification,
+NeMo TitaNet-small speaker embeddings (the same model as the live classifier; see
+docs/models_report.md) for speaker verification, closed-set identification,
 real-time streaming inference, and offline diarization.
 """
 
@@ -15,7 +15,7 @@ from typing import Optional
 
 import numpy as np
 
-from speck.speakers import SpeakerMatch, SpeakerTurn
+from speck.speakers import EMBEDDING_FILE, EMBEDDING_REPO, SpeakerMatch, SpeakerTurn
 from speck.utils import resolve_hf_file, to_mono_float32
 
 logger = logging.getLogger(__name__)
@@ -23,19 +23,20 @@ logger = logging.getLogger(__name__)
 PYANNOTE_SEGMENTATION_REPO = "csukuangfj/sherpa-onnx-pyannote-segmentation-3-0"
 PYANNOTE_SEGMENTATION_FILE = "model.int8.onnx"
 
-WESPEAKER_EMBEDDING_REPO = "csukuangfj/speaker-embedding-models"
-WESPEAKER_EMBEDDING_FILE = "wespeaker_en_voxceleb_resnet34_LM.onnx"
+# Calibrated for TitaNet-small on LibriSpeech (scripts/speaker_benchmark.py): cosine similarity
+# needed to accept an enrolled speaker, and the clustering distance for diarization.
+MATCH_THRESHOLD = 0.35
+CLUSTER_THRESHOLD = 0.7
 
 
 class PyannoteSpeakerRecognizer:
     """Production Pyannote.audio diarization & speaker recognition engine.
 
     Combines pyannote/segmentation-3.0 for detecting speaker boundaries and turns
-    with WeSpeaker ResNet34-LM (pyannote.audio 3.x voice embedding model)
-    for high-discrimination speaker identification and verification.
+    with TitaNet-small speaker embeddings for identification and verification.
     """
 
-    architecture_name: str = "Pyannote.audio (pyannote/segmentation-3.0 + WeSpeaker ResNet34)"
+    architecture_name: str = "Pyannote.audio (pyannote/segmentation-3.0 + TitaNet-small)"
 
     def __init__(
         self,
@@ -54,13 +55,13 @@ class PyannoteSpeakerRecognizer:
 
         # Resolve model paths
         self.embedding_model_path = resolve_hf_file(
-            model_path, WESPEAKER_EMBEDDING_REPO, WESPEAKER_EMBEDDING_FILE
+            model_path, EMBEDDING_REPO, EMBEDDING_FILE
         )
         self.segmentation_model_path = resolve_hf_file(
             segmentation_model_path, PYANNOTE_SEGMENTATION_REPO, PYANNOTE_SEGMENTATION_FILE
         )
 
-        # Initialize Pyannote embedding extractor (WeSpeaker ResNet34)
+        # Initialize the speaker embedding extractor (TitaNet-small)
         emb_cfg = sherpa_onnx.SpeakerEmbeddingExtractorConfig(
             model=self.embedding_model_path,
             num_threads=num_threads,
@@ -117,7 +118,7 @@ class PyannoteSpeakerRecognizer:
         self,
         audio: np.ndarray,
         num_speakers: int = -1,
-        threshold: float = 0.5,
+        threshold: float = CLUSTER_THRESHOLD,
         min_duration_on: float = 0.2,
         min_duration_off: float = 0.3,
     ) -> list[SpeakerTurn]:
@@ -172,7 +173,7 @@ class PyannoteSpeakerRecognizer:
                 seg_scores, _ = self.match(wav[start_samp:end_samp])
                 if seg_scores:
                     matched_spk = max(seg_scores, key=seg_scores.get)
-                    if seg_scores[matched_spk] >= 0.65:
+                    if seg_scores[matched_spk] >= MATCH_THRESHOLD:
                         label = matched_spk
                         score = seg_scores[matched_spk]
 
@@ -204,7 +205,7 @@ class PyannoteSpeakerRecognizer:
 class RealTimeStreamingEngine:
     """Live "who is speaking" over a rolling context window (e.g. 500 ms chunks, 1.5 s window)."""
 
-    def __init__(self, recognizer, sample_rate=16000, window_sec=1.5, chunk_sec=0.5, threshold=0.75):
+    def __init__(self, recognizer, sample_rate=16000, window_sec=1.5, chunk_sec=0.5, threshold=MATCH_THRESHOLD):
         self.recognizer = recognizer
         self.sr = sample_rate
         self.window_size = int(window_sec * sample_rate)

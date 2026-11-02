@@ -782,7 +782,7 @@ class TTSMetricsPipeline:
 
 1. **Acoustic Fidelity (MCD):** Mel-Cepstral Distortion measures spectral envelope distance using Dynamic Time Warping (DTW) with 16-order normalized Mel-generalized cepstra (excluding $c_0$).
 2. **Prosody Tracking ($F_0$ Metrics):** Fundamental frequency contours extracted via the normalized autocorrelation/YIN algorithm with energy-gated voicing detection; evaluated over mutually voiced frames for pitch deviation and melodic shape correlation ($F_0$ PCC).
-3. **Speaker Identity (SECS):** Deep speaker embeddings extracted via NeMo TitaNet / ResNet34 models, evaluating target voice cloning retention.
+3. **Speaker Identity (SECS):** Deep speaker embeddings extracted via NeMo TitaNet-small, evaluating target voice cloning retention.
 4. **Linguistic Accuracy & Intelligibility:** Normalized Word Error Rate (WER) and Character Error Rate (CER) computed with locale-aware tokenization handling English contractions and Italian apostrophe elisions (`l'albero`, `un'altra`) and accented vowels (`à`, `è`, `é`, `ì`, `ò`, `ù`).
 
 ---

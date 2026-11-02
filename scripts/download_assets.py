@@ -11,29 +11,19 @@ import urllib.request
 import sys
 import zlib
 
-def download_model(model_name="campplus", output_dir="models"):
-    os.makedirs(output_dir, exist_ok=True)
-    if model_name == "campplus":
-        model_path = os.path.join(output_dir, "campplus_cn_en_common_200k.onnx")
-        if os.path.exists(model_path):
-            print(f"[OK] Model already exists at {model_path}")
-            return model_path
+def download_models():
+    """Pre-fetch the ONNX models Speck loads (speaker embeddings, segmentation, VAD) into the HF cache."""
+    from speck.pyannote import PYANNOTE_SEGMENTATION_FILE, PYANNOTE_SEGMENTATION_REPO
+    from speck.speakers import EMBEDDING_FILE, EMBEDDING_REPO
+    from speck.utils import resolve_hf_file
+    from speck.vad import VAD_FILE, VAD_REPO
 
-        print("[...] Downloading CAM++ ONNX model from HuggingFace...")
+    for repo, filename in [(EMBEDDING_REPO, EMBEDDING_FILE), (PYANNOTE_SEGMENTATION_REPO, PYANNOTE_SEGMENTATION_FILE), (VAD_REPO, VAD_FILE)]:
         try:
-            from huggingface_hub import hf_hub_download
-            downloaded = hf_hub_download(
-                repo_id="welcomyou/campplus-3dspeaker-200k-onnx",
-                filename="campplus_cn_en_common_200k.onnx",
-                local_dir=output_dir
-            )
-            print(f"[OK] Model downloaded to {downloaded}")
-            return downloaded
+            print(f"[OK] {resolve_hf_file(None, repo, filename)}")
         except Exception as e:
-            print(f"[!] Error downloading model: {e}")
+            print(f"[!] Error downloading {repo}/{filename}: {e}")
             sys.exit(1)
-    else:
-        raise ValueError(f"Unknown model name: {model_name}")
 
 def download_cmu_arctic_dataset(output_dir="data", speakers=None, utterances_per_speaker=5):
     """
@@ -100,12 +90,11 @@ def download_librispeech(output_dir="data/librispeech", split="test-clean", chap
 
 def main():
     parser = argparse.ArgumentParser(description="Download models and audio datasets for Speck")
-    parser.add_argument("--models", action="store_true", help="Download ONNX speaker recognition models")
+    parser.add_argument("--models", action="store_true", help="Pre-fetch the ONNX speaker, segmentation and VAD models into the HF cache")
     parser.add_argument("--data", action="store_true", help="Download benchmark speech dataset (WAV files)")
     parser.add_argument("--all", action="store_true", help="Download both models and datasets (default)")
     parser.add_argument("--librispeech", choices=["test-clean", "test-other"], help="Download a LibriSpeech ASR evaluation subset")
     parser.add_argument("--chapter-step", type=int, default=5, help="Keep 1 LibriSpeech chapter in N (default: 5, ~1 h of test-clean)")
-    parser.add_argument("--models-dir", default="models", help="Directory for models (default: models)")
     parser.add_argument("--data-dir", default="data", help="Directory for audio dataset (default: data)")
     
     args = parser.parse_args()
@@ -116,7 +105,7 @@ def main():
         args.all = True
 
     if args.all or args.models:
-        download_model(output_dir=args.models_dir)
+        download_models()
         
     if args.all or args.data:
         download_cmu_arctic_dataset(output_dir=args.data_dir)

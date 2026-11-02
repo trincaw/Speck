@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from transformers.audio_utils import load_audio
 
-from speck.pyannote import PyannoteSpeakerRecognizer, RealTimeStreamingEngine
+from speck.pyannote import MATCH_THRESHOLD, PyannoteSpeakerRecognizer, RealTimeStreamingEngine
 
 
 @pytest.fixture(scope="module")
@@ -44,8 +44,7 @@ def test_verification_separation(recognizer):
     same_score, _ = recognizer.verify(obama1, obama2)
     diff_score, _ = recognizer.verify(obama1, sample1)
 
-    assert same_score > diff_score
-    assert same_score > 0.80
+    assert same_score > MATCH_THRESHOLD > diff_score
 
 
 def test_diarize_two_speakers(recognizer):

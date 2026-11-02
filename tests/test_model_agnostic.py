@@ -149,7 +149,7 @@ def test_factory_resolves_whisper_and_parakeet():
     from speck.engines.parakeet import ParakeetASR
     from speck.engines.whisper import WhisperASR
 
-    for alias, model_id in [("whisper-base", "base"), ("whisper-large-v3-turbo", "large-v3-turbo"), ("whisper", "large-v3-turbo")]:
+    for alias, model_id in [("whisper-large-v3-turbo", "large-v3-turbo"), ("whisper", "large-v3-turbo")]:
         engine = get_engine(alias)
         assert isinstance(engine, WhisperASR) and engine.model_id == model_id
     assert get_engine("Systran/faster-whisper-small").model_id == "Systran/faster-whisper-small"
