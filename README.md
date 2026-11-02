@@ -6,13 +6,6 @@
 
 Model-agnostic speech recognition with real-time streaming and live speaker labels.
 
-| Engine | `--model` | Notes |
-|---|---|---|
-| NVIDIA Nemotron 3.5 (0.6B) | `nemotron` | Local, streaming, 80–1120 ms latency |
-| Mistral Voxtral Mini Transcribe 2 | `voxtral` | Cloud API (`MISTRAL_API_KEY`) or local weights |
-| Whisper (faster-whisper) | `whisper`, `whisper-base`, `whisper-large-v3-turbo`, … | Local, offline; beam search, VAD filter, hotwords |
-| NVIDIA Parakeet-TDT v3 (0.6B) | `parakeet` | **Default.** Local, offline, 25 European languages; live mode transcribes per utterance (VAD) |
-
 ## Install
 
 ```bash
@@ -80,7 +73,7 @@ Add your own engine by subclassing `BaseASREngine` and calling `speck.factory.re
 | Setting (`.env`) | Effect |
 |---|---|
 | `SPECK_LANGUAGE=en` | Locks Whisper to one language (no identification pass, no false switches); also the CLI `--language` default |
-| `SPECK_HOTWORDS=Avvale,Kubernetes` | Biases Whisper decoding and snaps near-miss words in every engine's output to this vocabulary |
+| `SPECK_HOTWORDS=Docker,Kubernetes` | Biases Whisper decoding and snaps near-miss words in every engine's output to this vocabulary |
 | `SPECK_BEAM_SIZE=5` | Whisper beam width |
 | `SPECK_NORMALIZE_AUDIO=1` | DC removal and peak normalization of offline audio (`0` disables) |
 
@@ -100,44 +93,10 @@ python scripts/asr_benchmark.py --models nemotron whisper-large-v3-turbo parakee
 uv run pytest
 ```
 
-## Metrics & Evaluation Pipelines
+## Docs
 
-Speck provides standardized evaluation pipelines for both **Speaker Recognition** and **Text-to-Speech (TTS) / Speech Intelligibility**:
+Read these before working on the related area:
 
-### 1. Speaker Recognition Pipeline
-Measures **Equal Error Rate (EER)**, **NIST minDCF**, **AUC-ROC**, and **real-time streaming latency**:
-
-```bash
-# 1. Download models and benchmark audio WAV dataset
-python scripts/download_assets.py --all
-
-# 2. Run speaker verification & identification evaluation
-python main.py evaluate --task speaker --data-dir data/ --output-dir reports/
-```
-
-### 2. Text-to-Speech (TTS) & Linguistic Pipeline (English & Italian)
-Measures objective speech synthesis quality and round-trip intelligibility:
-* **Acoustic Fidelity:** **Mel-Cepstral Distortion (MCD)** via Dynamic Time Warping (DTW) in dB.
-* **Prosody Tracking:** **$F_0$ Pitch RMSE** (Hz and cents), **$F_0$ Pearson Correlation Coefficient (PCC)**, **Voicing Decision Error (VDE)**, and **Gross Pitch Error (GPE)**.
-* **Speaker Identity (SECS):** Deep speaker embedding cosine similarity between reference and synthesized voices.
-* **Linguistic Accuracy & Intelligibility:** Normalized **Word Error Rate (WER)**, **Character Error Rate (CER)**, **Match Error Rate (MER)**, and **Word Information Lost (WIL)** with specialized normalizers for:
-  * **English (`en-US`):** Contraction expansion (`it's` -> `it is`, `don't` -> `do not`), punctuation normalization.
-  * **Italian (`it-IT`):** Italian apostrophe elisions (`l'albero`, `un'altra`, `c'è`, `qual è`) and vowel accent preservation (`à`, `è`, `é`, `ì`, `ò`, `ù`).
-
-```bash
-# Run TTS evaluation suite across English and Italian
-python main.py evaluate --task tts --output-dir reports/
-
-# Or run the entire unified test suite via pytest
-uv run pytest tests/test_tts_metrics.py -v
-```
-
-Generated evaluation artifacts are stored in `reports/`:
-- `reports/EVALUATION_REPORT.md`: Speaker recognition executive report.
-- `reports/metrics_summary.json`: Machine-readable speaker evaluation dump.
-- `reports/TTS_EVALUATION_REPORT.md`: Multilingual TTS and linguistic evaluation report.
-- `reports/tts_metrics_summary.json`: Machine-readable TTS evaluation dump.
-- `reports/roc_curve.csv`: Coordinates for plotting verification ROC curves.
-
-For detailed instructions on obtaining WAV files, converting your own voice recordings, and downloading model weights, see [docs/data_and_models.md](docs/data_and_models.md).
-
+- [docs/metrics.md](docs/metrics.md): speaker and TTS evaluation pipelines (`main.py evaluate`), metrics, report files.
+- [docs/data_and_models.md](docs/data_and_models.md): downloading models and datasets, audio format, dataset layout.
+- [docs/models_report.md](docs/models_report.md): measured WER/RTF/EER per model; use it to choose a model.
