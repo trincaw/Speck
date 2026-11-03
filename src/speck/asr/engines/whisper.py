@@ -108,7 +108,6 @@ class WhisperASR(BaseASREngine):
         self,
         audio: AudioInput,
         language: str = "auto",
-        lookahead: int = 6,
         skip_special_tokens: bool = True,
         simulate_realtime: bool = False,
         **kwargs: Any,

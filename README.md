@@ -4,35 +4,35 @@
 
 # Speck
 
-Model-agnostic linux speech recognition with real-time streaming and live speaker labels.
+Linux speech recognition with real-time streaming and live speaker labels. Parakeet by default, Whisper as the alternative.
 
-## Install
-
-```bash
-uv sync                 # or: pip install -e .
-uv run speck --help     # or: python -m speck --help
-```
-
-Installs the `speck` command and the Python library from this checkout (Python 3.12+). The `speck` name on PyPI is a different project. Configure through environment variables
-(see [.env.example](.env.example)).
-Default models: Parakeet for ASR, Whisper large-v3-turbo and Nemotron (streaming) as alternatives, TitaNet-small for speakers ([benchmarks](docs/models_report.md)).
-
-### Download the models
-
-Nothing is bundled: models are fetched from HuggingFace on first use (cached in `~/.cache/huggingface`). Pre-fetch them to avoid a slow first run or to work offline:
+## Quick start
 
 ```bash
-uv run python scripts/download_assets.py --models        # speaker, VAD and segmentation ONNX models
-uv run hf download nvidia/parakeet-tdt-0.6b-v3           # default ASR engine
-uv run speck transcribe samples/bcn_weather.mp3          # verify the setup
+uv sync && uv run speck setup     # install, fetch the default models, verify on a sample
+uv run speck mixed                # start live transcription
 ```
 
-Whisper and Nemotron downloads, tokens, offline mode: [docs/download_models.md](docs/download_models.md).
+`speck setup` creates `.env` from [.env.example](.env.example) if missing, downloads the speaker, segmentation and VAD
+models plus the `SPECK_MODEL` engine (Parakeet) into `~/.cache/huggingface`, then transcribes `samples/bcn_weather.mp3`.
+`--all` also fetches Whisper, `--model whisper` fetches only Whisper, `--no-verify` skips the check.
+Whisper on GPU needs the CUDA 12 cuBLAS/cuDNN libraries (CTranslate2 is built for CUDA 12); without them use `--device cpu`.
+
+Python 3.12+; `pip install -e .` works too. The `speck` name on PyPI is a different project.
+
+| Role | Model |
+|---|---|
+| ASR (default) | `parakeet`: NVIDIA Parakeet-TDT v3 0.6B, 25 European languages |
+| ASR (alternative) | `whisper`: faster-whisper large-v3-turbo, 99 languages, language lock, hotwords |
+| Speakers | TitaNet-small embeddings (best of 9 benchmarked), pyannote segmentation-3.0, Silero VAD |
+
+Benchmarks: [docs/models_report.md](docs/models_report.md). Manual downloads, tokens, offline mode: [docs/download_models.md](docs/download_models.md).
 
 ## CLI
 
 | Command | Does |
 |---|---|
+| `speck setup` | Fetch the default models and verify the install |
 | `speck transcribe AUDIO` | Offline transcription |
 | `speck stream AUDIO` | Streaming transcription of a file (`--simulate-realtime`) |
 | `speck mic` | Live microphone transcription |
@@ -41,7 +41,6 @@ Whisper and Nemotron downloads, tokens, offline mode: [docs/download_models.md](
 | `speck diarize AUDIO` | Offline "who spoke when" (pyannote segmentation-3.0 + TitaNet-small) |
 | `speck listen` | Auto-transcribe calls and videos playing on this machine (Linux) |
 | `speck mixed` | Mic + system audio: `[You]` vs. `[Remote]` (Linux) |
-| `speck benchmark AUDIO` | Real-time factor per latency preset |
 | `speck models` / `speck languages` | List engines / languages |
 | `speck evaluate` | Speaker / TTS metric pipelines, reports in `reports/` ([docs](docs/metrics.md)) |
 
@@ -51,11 +50,10 @@ Common flags (`speck <command> --help` for the rest):
 |---|---|
 | `--model NAME`, `--device cuda\|cpu` | Engine alias or checkpoint, and where to run it |
 | `--language CODE` | Locale like `en-US`, or `auto`; default is `SPECK_LANGUAGE` (`auto`) |
-| `--lookahead 0\|3\|6\|13` | Latency preset: 80 / 320 / 560 (default) / 1120 ms. Lower is lower latency, higher is more accurate. Only Nemotron uses it; other engines ignore it |
 | `--speakers` | Label speakers (`mic`, `listen`; already on in `mixed`, `--no-speakers` turns it off) |
 | `--enroll NAME=WAV` | Known voice sample, repeatable (also on `speakers`, `identify`, `diarize`) |
 | `--enroll-dir DIR` | `identify` / `diarize`: enroll the first WAV of each `DIR/<speaker>/` (default `data`) |
-| `--speaker-threshold X` | Match strictness, default 0.35. Raise if people get merged, lower if one is split |
+| `--speaker-threshold X` | Match strictness, default 0.35 (the speaker model's calibration). Raise if people get merged, lower if one is split |
 | `--num-speakers N` | Cap on speakers discovered |
 
 ```bash
@@ -72,7 +70,7 @@ speck mixed --speakers --save call.txt                  # --me/--remote rename l
 ```python
 from speck import get_engine, SpeakerClassifier, SpeakerEmbedder
 
-engine = get_engine("parakeet").load()      # defaults to SPECK_MODEL (parakeet)
+engine = get_engine().load()                # SPECK_MODEL, default "parakeet"; or get_engine("whisper")
 print(engine.transcribe("audio.mp3", language="en-US").text)
 
 # live: push 16 kHz mono float32 chunks, read text as it arrives
@@ -84,7 +82,9 @@ session.push_audio(chunk)
 session.finish(); session.join()
 ```
 
-Add your own engine by subclassing `speck.asr.BaseASREngine` and calling `speck.register_engine(alias, cls)`. An unrecognized model string falls back to Parakeet.
+Add an engine by subclassing `speck.asr.BaseASREngine` (`name`, `sampling_rate`, `load`, `transcribe`, `stream_transcribe`), then either call `speck.register_engine(alias, cls)` at runtime or, to ship it built in, add an `EngineSpec` to `ENGINE_SPECS` in [src/speck/asr/registry.py](src/speck/asr/registry.py). Live sessions, speaker labels, hotwords and `speck setup` work with any engine. An unrecognized model string falls back to Parakeet.
+
+Speaker, segmentation and VAD models work the same way: one entry each in `EMBEDDING_MODELS`, `SEGMENTATION_MODELS` and `VAD_MODELS` in [src/speck/hub.py](src/speck/hub.py). An embedding model carries its own match and clustering thresholds (measure them with `scripts/speaker_benchmark.py`); select it with `SPECK_SPEAKER_MODEL`.
 
 ## Lowering the error rate
 
@@ -104,7 +104,7 @@ Italian, and spelled-out numbers ("35" vs "thirty five") in English only (the sc
 
 ```bash
 python scripts/download_assets.py --librispeech test-clean          # ~1 h subset
-python scripts/asr_benchmark.py --models parakeet whisper-large-v3-turbo nemotron --ensemble   # --ensemble needs 3+ models; writes reports/asr_benchmark.json
+python scripts/asr_benchmark.py --models parakeet whisper-large-v3-turbo   # writes reports/asr_benchmark.json; --ensemble needs 3+ models (checkpoints count)
 python scripts/speaker_benchmark.py --models nemo_en_titanet_small.onnx nemo_en_titanet_large.onnx   # speaker-embedding EER; writes reports/speaker_benchmark.json
 ```
 
@@ -112,13 +112,13 @@ python scripts/speaker_benchmark.py --models nemo_en_titanet_small.onnx nemo_en_
 
 ```
 src/speck/
-├── asr/          BaseASREngine, engines/ (parakeet, whisper, nemotron, voxtral), registry, hotword + ROVER post-processing
+├── asr/          BaseASREngine, engines/ (parakeet, whisper), registry, hotword + ROVER post-processing
 ├── speakers/     embeddings (TitaNet-small), live online classifier, offline recognizer / diarizer
 ├── streaming/    Silero VAD, push-based live sessions, mic + system audio mixing
 ├── capture/      microphone and PulseAudio / PipeWire sources
 ├── evaluation/   speaker, transcript (WER/CER) and TTS metrics and pipelines
-├── cli/          `speck` command: app.py (entry point), options.py, commands/<domain>.py
-├── audio.py      array helpers    hub.py  model assets on HuggingFace    config.py  .env settings
+├── cli/          `speck` command: app.py (entry point), options.py, commands/<domain>.py (setup.py: onboarding)
+├── audio.py      array helpers    hub.py  speaker / VAD model registry on HuggingFace    config.py  .env settings
 ```
 
 `scripts/` holds the dataset and benchmark tools: `download_assets.py`, `asr_benchmark.py` and `speaker_benchmark.py`.

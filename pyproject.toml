@@ -1,7 +1,7 @@
 [project]
 name = "speck"
 version = "0.2.0"
-description = "Model-agnostic real-time ASR with live speaker classification"
+description = "Real-time ASR (Parakeet, Whisper) with live speaker classification"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -9,7 +9,6 @@ dependencies = [
     "huggingface-hub>=0.20.0",
     "numpy>=1.26",
     "rich>=13.0.0",
-    "requests>=2.31",
     "sherpa-onnx>=1.13.8",
     "sherpa-onnx-core>=1.13.8",
     "sounddevice>=0.5.6",

@@ -10,21 +10,21 @@ Raw results live in `reports/` (git-ignored); historic sources in `reports/histo
 |---|---|---|---|
 | ASR (default, `SPECK_MODEL`) | `parakeet` (Parakeet-TDT v3 0.6B) | every `speck` command, unrecognized `--model` values | Best WER, CER and RTF of all engines |
 | ASR, multilingual control | `whisper` (large-v3-turbo) | `--model whisper` | Second-best WER; language lock and hotword biasing. Beats large-v3 on accuracy and speed |
-| ASR, lowest latency | `nemotron` (Nemotron 3.5 streaming 0.6B) | `--model nemotron`, `speck benchmark` | Only native streaming engine (`--lookahead` 80-1120 ms) |
-| Speaker embeddings | TitaNet-small | live `--speakers`, `identify` / `diarize`, SECS | Lowest EER of 9 candidates, 2nd-fastest |
+| Speaker embeddings | TitaNet-small (`SPECK_SPEAKER_MODEL=titanet-small`, the only registered one) | live `--speakers`, `identify` / `diarize`, SECS | Lowest EER of 9 candidates, 2nd-fastest; the others are benchmark data only |
 | Diarization clustering threshold | 0.7 (TitaNet-small) | `speck diarize` | Speaker count right in 15/16 test conversations |
 
 ## ASR: LibriSpeech test-clean subset (2026-11-02)
 
-723 utterances (18 speakers, ~93 min). Source: `reports/asr_benchmark.json`; regenerate with `scripts/asr_benchmark.py --models parakeet whisper-large-v3-turbo nemotron`.
+723 utterances (18 speakers, ~93 min). Source: `reports/asr_benchmark.json`; regenerate with `scripts/asr_benchmark.py --models parakeet whisper-large-v3-turbo`.
 
 | Model | WER | CER | RTF |
 |---|---|---|---|
 | `parakeet` | **1.98%** | **0.61%** | **0.0125** |
 | `whisper-large-v3-turbo` | 2.26% | 0.87% | 0.0428 |
 | `whisper-large-v3` | 2.49% | 1.19% | 0.0801 |
-| `nemotron` | 3.37% | 1.16% | 0.0229 |
+| `nemotron` (removed) | 3.37% | 1.16% | 0.0229 |
 
+- Nemotron 3.5 streaming (worst WER of the three) and Voxtral (API-only, never measured) were removed; only Parakeet and Whisper are built in.
 - `whisper-large-v3` is worse than turbo on every metric and ~2x slower; its alias was removed (still reachable by repo id, e.g. `--model Systran/faster-whisper-large-v3`).
 - `whisper-medium`/`small`/`base`/`tiny` were not re-run (too slow to justify; the historic 3-clip run below already showed no accuracy edge); their aliases were removed.
 - Whisper on GPU needs the CUDA 12 cuBLAS/cuDNN libraries (CTranslate2 4.8 is built for CUDA 12); see the README.
@@ -75,10 +75,6 @@ pyannote segmentation-3.0 + TitaNet-small, 12 test samples, 3 speakers (bdl, clb
 | Streaming chunk latency (500 ms chunk) | 15 ms |
 
 Small test set; use the LibriSpeech table above to compare models.
-
-## Not measured
-
-- `voxtral`: needs `MISTRAL_API_KEY` (API backend) or ~8 GB VRAM for the 4B local weights.
 
 ## Historic benchmarks
 

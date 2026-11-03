@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Generator, Optional, Union
@@ -30,17 +29,6 @@ class TranscriptionResult:
     inference_seconds: float
     real_time_factor: float
     segments: Optional[list[dict[str, Any]]] = None
-
-
-@dataclass
-class BenchmarkResult:
-    """Benchmark metrics across streaming configurations."""
-    lookahead_tokens: Union[int, str]
-    configured_latency_ms: float
-    audio_duration_seconds: float
-    elapsed_seconds: float
-    real_time_factor: float
-    transcript: str
 
 
 def rtf(elapsed: float, duration: float) -> float:
@@ -75,10 +63,6 @@ class BaseASREngine(ABC):
 
     @property
     def supported_languages(self) -> dict[str, Any]:
-        return {}
-
-    @property
-    def streaming_presets(self) -> dict[Union[int, str], dict[str, Any]]:
         return {}
 
     @abstractmethod
@@ -126,7 +110,6 @@ class BaseASREngine(ABC):
         self,
         audio: AudioInput,
         language: str = "auto",
-        lookahead: int = 6,
         skip_special_tokens: bool = True,
         simulate_realtime: bool = False,
         **kwargs: Any,
@@ -136,7 +119,6 @@ class BaseASREngine(ABC):
     def create_stream_session(
         self,
         language: str = "auto",
-        lookahead: int = 6,
         skip_special_tokens: bool = True,
         on_token: Optional[Callable[[str], None]] = None,
         speakers: Optional[SpeakerClassifier] = None,
@@ -153,36 +135,7 @@ class BaseASREngine(ABC):
         return (SpeakerStreamSession if speakers is not None else UtteranceStreamSession)(
             engine=self,
             language=language,
-            lookahead=lookahead,
             skip_special_tokens=skip_special_tokens,
             on_token=on_token,
             **kwargs,
         )
-
-    def benchmark(
-        self,
-        audio: AudioInput,
-        lookaheads: Optional[list[int]] = None,
-        language: str = "auto",
-    ) -> list[BenchmarkResult]:
-        """Benchmark streaming performance across preset configurations."""
-        presets = self.streaming_presets
-        lookaheads = lookaheads or [k for k in presets if isinstance(k, int)] or [0]
-        wav, duration = self._prepare_audio(audio)
-
-        results: list[BenchmarkResult] = []
-        for lookahead in lookaheads:
-            start = time.perf_counter()
-            transcript = "".join(self.stream_transcribe(wav, language=language, lookahead=lookahead))
-            elapsed = time.perf_counter() - start
-            results.append(
-                BenchmarkResult(
-                    lookahead_tokens=lookahead,
-                    configured_latency_ms=presets.get(lookahead, {}).get("latency_ms", 0.0),
-                    audio_duration_seconds=duration,
-                    elapsed_seconds=elapsed,
-                    real_time_factor=rtf(elapsed, duration),
-                    transcript=transcript.strip(),
-                )
-            )
-        return results

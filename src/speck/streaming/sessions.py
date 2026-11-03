@@ -68,13 +68,11 @@ class BaseAudioStreamSession(ABC):
         self,
         engine: BaseASREngine,
         language: str = "auto",
-        lookahead: int = 6,
         skip_special_tokens: bool = True,
         on_token: Optional[Callable[[str], None]] = None,
     ):
         self.engine = engine
         self.language = language
-        self.lookahead = lookahead
         self.skip_special_tokens = skip_special_tokens
         self.on_token = on_token
         self.sr = engine.sampling_rate

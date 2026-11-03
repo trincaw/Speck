@@ -4,7 +4,9 @@ Speaker-embedding benchmark: verification EER per embedding model on a LibriSpee
 (speaker = first-level directory), on whole utterances and on short crops like the live turns
 the `speck` classifier embeds.
 
-    python scripts/speaker_benchmark.py --models nemo_en_titanet_small.onnx wespeaker_en_voxceleb_resnet34_LM.onnx
+    python scripts/speaker_benchmark.py --models nemo_en_titanet_small.onnx nemo_en_titanet_large.onnx
+
+To adopt a new model, add it to speck.hub.EMBEDDING_MODELS with the thresholds measured here.
 """
 
 import argparse
@@ -17,8 +19,10 @@ import numpy as np
 import soundfile as sf
 
 from speck.evaluation.speaker_metrics import compute_eer
-from speck.hub import EMBEDDING_REPO, resolve_hf_file
+from speck.hub import embedding_model, resolve_hf_file
 from speck.speakers import SpeakerEmbedder
+
+EMBEDDING_REPO = embedding_model().repo  # candidate ONNX files share the default model's repo
 
 
 def load_items(data_dir, limit):

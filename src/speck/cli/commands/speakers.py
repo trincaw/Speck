@@ -116,8 +116,6 @@ def handle_diarize(args: argparse.Namespace) -> None:
 
 
 def register(sub: argparse._SubParsersAction, opts: Options) -> None:
-    from speck.speakers.recognizer import CLUSTER_THRESHOLD
-
     p = sub.add_parser("speakers", help="Live speaker classification from mic (or a file)",
                        parents=[opts.enroll, opts.live_speakers])
     p.add_argument("audio", nargs="?", help="Classify a file instead of the microphone")
@@ -139,6 +137,6 @@ def register(sub: argparse._SubParsersAction, opts: Options) -> None:
                        parents=[opts.enroll, opts.enroll_dir])
     p.add_argument("audio")
     p.add_argument("--num-speakers", type=int, default=None, help="Expected number of speakers (default: auto)")
-    p.add_argument("--cluster-threshold", type=float, default=CLUSTER_THRESHOLD,
-                   help="Clustering distance; lower finds more speakers (default: %(default)s)")
+    p.add_argument("--cluster-threshold", type=float, default=None,
+                   help="Clustering distance; lower finds more speakers (default: the speaker model's calibration)")
     p.set_defaults(func=handle_diarize)

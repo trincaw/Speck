@@ -3,7 +3,7 @@
 ASR accuracy benchmark: corpus-level WER/CER per engine on a LibriSpeech-style folder
 (`*.trans.txt` files next to the FLAC/WAV audio), optionally with a ROVER ensemble of all engines.
 
-    python scripts/asr_benchmark.py --models nemotron whisper-large-v3-turbo parakeet --limit 100
+    python scripts/asr_benchmark.py --models parakeet whisper-large-v3-turbo --limit 100
 """
 
 import argparse

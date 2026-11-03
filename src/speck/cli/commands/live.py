@@ -10,7 +10,7 @@ from pathlib import Path
 
 from rich.table import Table
 
-from speck.cli.options import Options, load_engine, preset_label, speaker_factory
+from speck.cli.options import Options, load_engine, speaker_factory
 from speck.cli.ui import console, print_token, print_transcript, save_transcript, wait_for_interrupt
 
 
@@ -28,14 +28,12 @@ def handle_mic(args: argparse.Namespace) -> None:
     from speck.capture.microphone import open_microphone
 
     engine = load_engine(args)
-    console.print(f"[bold]Language:[/bold] [yellow]{args.language}[/yellow]  [bold]Preset:[/bold] [magenta]{preset_label(engine, args.lookahead)}[/magenta]")
+    console.print(f"[bold]Language:[/bold] [yellow]{args.language}[/yellow]")
     new_classifier = speaker_factory(args, engine.sampling_rate) if args.speakers else None
     console.print("[bold green]Listening... press Ctrl+C to stop.[/bold green]\n")
 
     session = engine.create_stream_session(
         language=args.language,
-        lookahead=args.lookahead,
-        skip_special_tokens=not args.keep_tag,
         on_token=print_token,
         speakers=new_classifier() if new_classifier else None,
     ).start()
@@ -63,8 +61,6 @@ def handle_listen(args: argparse.Namespace) -> None:
     def new_session():
         return engine.create_stream_session(
             language=args.language,
-            lookahead=args.lookahead,
-            skip_special_tokens=not args.keep_tag,
             on_token=print_token,
             speakers=new_classifier() if new_classifier else None,  # speakers are per recording
         )
@@ -127,8 +123,6 @@ def handle_mixed(args: argparse.Namespace) -> None:
         on_token=print_token,
         speakers=new_classifier() if new_classifier else None,
         language=args.language,
-        lookahead=args.lookahead,
-        skip_special_tokens=not args.keep_tag,
     ).start()
     capture = sa.DualCapture(session.push_mic, session.push_system, mic_device=args.mic_source,
                              system_device=args.system_source, sample_rate=engine.sampling_rate)
@@ -180,7 +174,7 @@ def print_audio_streams(sa) -> None:
 
 
 def register(sub: argparse._SubParsersAction, opts: Options) -> None:
-    live = [opts.engine, opts.asr, opts.lookahead]
+    live = [opts.engine, opts.asr]
     speakers = [opts.enroll, opts.live_speakers]
 
     p = sub.add_parser("mic", help="Live microphone transcription", parents=[*live, opts.diarize, *speakers])

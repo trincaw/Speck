@@ -32,7 +32,7 @@ MAX_SEGMENT_SECONDS = 30.0
 
 
 class ParakeetASR(BaseASREngine):
-    """Offline Parakeet-TDT: more accurate than the streaming Nemotron, at the cost of live latency."""
+    """Offline Parakeet-TDT; live use goes through VAD-segmented utterances."""
 
     def __init__(
         self,
@@ -109,7 +109,6 @@ class ParakeetASR(BaseASREngine):
         self,
         audio: AudioInput,
         language: str = "auto",
-        lookahead: int = 6,
         skip_special_tokens: bool = True,
         simulate_realtime: bool = False,
         **kwargs: Any,

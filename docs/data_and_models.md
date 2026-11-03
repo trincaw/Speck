@@ -7,7 +7,7 @@ python scripts/download_assets.py --all        # or --models / --data
 python scripts/download_assets.py --librispeech test-clean   # ASR WER set (~1 h)
 ```
 
-The ONNX models are fetched from HuggingFace into the HF cache on first use: TitaNet-small (speaker embeddings for live labels, `identify` / `diarize` and SECS), pyannote segmentation-3.0 (`diarize`) and Silero VAD; their repos and filenames are listed in `src/speck/hub.py`. `--models` pre-fetches them, e.g. before going offline. Model choice and benchmarks: [models_report.md](models_report.md).
+The ONNX models are fetched from HuggingFace into the HF cache on first use: TitaNet-small (speaker embeddings for live labels, `identify` / `diarize` and SECS), pyannote segmentation-3.0 (`diarize`) and Silero VAD; their repos and filenames are registered in `src/speck/hub.py`. `--models` pre-fetches them, e.g. before going offline. Model choice and benchmarks: [models_report.md](models_report.md).
 
 `--data` fetches CMU Arctic (speakers `slt`, `bdl`, `clb`, utterances `arctic_a0001`-`a0005`) into `data/<speaker>/`. `--librispeech` downloads into `data/librispeech/<split>` and exits without doing `--models`/`--data`; `--chapter-step N` keeps 1 chapter in N (default 5).
 

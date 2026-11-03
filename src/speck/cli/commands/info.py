@@ -8,7 +8,7 @@ from rich.table import Table
 
 from speck.cli.options import Options
 from speck.cli.ui import console, print_banner
-from speck.config import get_mistral_api_key, get_model_name
+from speck.config import get_model_name
 
 
 def handle_models(args: argparse.Namespace) -> None:
@@ -24,9 +24,7 @@ def handle_models(args: argparse.Namespace) -> None:
         table.add_row(status, m["id"], m["name"], m["model_id"], m["type"], m["description"])
     console.print(table)
 
-    has_key = bool(get_mistral_api_key())
     console.print(f"\nSPECK_MODEL: [yellow]{get_model_name()}[/yellow]")
-    console.print(f"MISTRAL_API_KEY: {'[green]set' if has_key else '[red]not set (needed for Voxtral API)'}[/]")
     console.print("[dim]Switch models via .env or --model <id>.[/dim]\n")
 
 

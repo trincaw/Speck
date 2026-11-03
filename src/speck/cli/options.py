@@ -32,10 +32,6 @@ class Options:
         self.asr = _parent()
         self.asr.add_argument("--language", default=get_language(),
                               help="Locale (e.g. en-US) or 'auto' (default: SPECK_LANGUAGE)")
-        self.asr.add_argument("--keep-tag", action="store_true", help="Keep the <xx-XX> language tag in output")
-
-        self.lookahead = _parent()
-        self.lookahead.add_argument("--lookahead", type=int, default=6, help="Latency preset: 0, 3, 6, 13")
 
         self.channel_tags = _parent()
         self.channel_tags.add_argument("--tag-speakers", action=argparse.BooleanOptionalAction, default=None,
@@ -72,11 +68,6 @@ def load_engine(args: argparse.Namespace, **kwargs: Any) -> BaseASREngine:
         engine.load()
     print_banner(engine)
     return engine
-
-
-def preset_label(engine: BaseASREngine, lookahead: int) -> str:
-    cfg = engine.streaming_presets.get(lookahead, {"latency_ms": 0.0, "description": "Custom"})
-    return f"{cfg.get('description', '')} ({cfg.get('latency_ms', 0)}ms)"
 
 
 def load_wav(path: str, sample_rate: int = SAMPLE_RATE):

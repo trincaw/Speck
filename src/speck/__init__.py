@@ -22,17 +22,11 @@ _EXPORTS: dict[str, str] = {
     # ASR
     "BaseASREngine": "speck.asr",
     "TranscriptionResult": "speck.asr",
-    "BenchmarkResult": "speck.asr",
-    "NemotronASR": "speck.asr",
     "ParakeetASR": "speck.asr",
     "WhisperASR": "speck.asr",
-    "VoxtralASR": "speck.asr",
-    "VoxtralMiniTranscribe": "speck.asr",
     "get_engine": "speck.asr",
     "register_engine": "speck.asr",
     "list_available_models": "speck.asr",
-    "LOOKAHEAD_CONFIGS": "speck.asr",
-    "SUPPORTED_LANGUAGES": "speck.asr",
     "correct_vocabulary": "speck.asr",
     "rover": "speck.asr",
     # Speakers
@@ -84,15 +78,9 @@ def __dir__() -> list[str]:
 
 if TYPE_CHECKING:  # static view of the lazy exports above
     from speck.asr import (  # noqa: F401
-        LOOKAHEAD_CONFIGS,
-        SUPPORTED_LANGUAGES,
         BaseASREngine,
-        BenchmarkResult,
-        NemotronASR,
         ParakeetASR,
         TranscriptionResult,
-        VoxtralASR,
-        VoxtralMiniTranscribe,
         WhisperASR,
         correct_vocabulary,
         get_engine,

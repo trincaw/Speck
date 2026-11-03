@@ -87,26 +87,16 @@ def get_dtype_str() -> Optional[str]:
     return env("SPECK_DTYPE")
 
 
-def get_mistral_api_key() -> Optional[str]:
-    return env("MISTRAL_API_KEY")
-
-
-def get_voxtral_model() -> str:
-    return env("VOXTRAL_MODEL", "VOXTRAL_MODEL_ID", default="voxtral-mini-latest")
-
-
-def get_voxtral_backend() -> str:
-    backend = env("VOXTRAL_BACKEND", default="api").lower()
-    return backend if backend in ("api", "local") else "api"
-
-
-def get_voxtral_api_url() -> str:
-    return env("VOXTRAL_API_URL", default="https://api.mistral.ai/v1/audio/transcriptions")
+def get_speaker_model() -> Optional[str]:
+    """Speaker-embedding model id (see speck.hub.EMBEDDING_MODELS); None selects the default."""
+    return env("SPECK_SPEAKER_MODEL")
 
 
 def get_speaker_threshold() -> float:
-    """Cosine similarity needed to match a known speaker during live classification."""
-    return env("SPECK_SPEAKER_THRESHOLD", default=0.35, cast=float)
+    """Cosine similarity needed to match a known speaker; defaults to the embedding model's calibration."""
+    from speck.hub import embedding_model
+
+    return env("SPECK_SPEAKER_THRESHOLD", default=embedding_model().match_threshold, cast=float)
 
 
 def get_language() -> str:

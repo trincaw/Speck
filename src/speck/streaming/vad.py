@@ -7,7 +7,7 @@ from typing import Optional
 
 import numpy as np
 
-from speck.hub import VAD_FILE, VAD_REPO, resolve_hf_file
+from speck.hub import vad_model
 
 
 @dataclass
@@ -32,7 +32,7 @@ class VadSegmenter:
         import sherpa_onnx
 
         cfg = sherpa_onnx.VadModelConfig()
-        cfg.silero_vad.model = resolve_hf_file(model, VAD_REPO, VAD_FILE)
+        cfg.silero_vad.model = vad_model().path(model)
         cfg.silero_vad.threshold = threshold
         cfg.silero_vad.min_silence_duration = min_silence
         cfg.silero_vad.min_speech_duration = min_speech

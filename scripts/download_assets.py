@@ -13,21 +13,13 @@ import zlib
 
 def download_models():
     """Pre-fetch the ONNX models Speck loads (speaker embeddings, segmentation, VAD) into the HF cache."""
-    from speck.hub import (
-        EMBEDDING_FILE,
-        EMBEDDING_REPO,
-        PYANNOTE_SEGMENTATION_FILE,
-        PYANNOTE_SEGMENTATION_REPO,
-        VAD_FILE,
-        VAD_REPO,
-        resolve_hf_file,
-    )
+    from speck.hub import default_assets
 
-    for repo, filename in [(EMBEDDING_REPO, EMBEDDING_FILE), (PYANNOTE_SEGMENTATION_REPO, PYANNOTE_SEGMENTATION_FILE), (VAD_REPO, VAD_FILE)]:
+    for asset in default_assets():
         try:
-            print(f"[OK] {resolve_hf_file(None, repo, filename)}")
+            print(f"[OK] {asset.path()}")
         except Exception as e:
-            print(f"[!] Error downloading {repo}/{filename}: {e}")
+            print(f"[!] Error downloading {asset.repo}/{asset.filename}: {e}")
             sys.exit(1)
 
 def download_cmu_arctic_dataset(output_dir="data", speakers=None, utterances_per_speaker=5):
