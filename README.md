@@ -14,9 +14,20 @@ uv run speck --help     # or: python -m speck --help
 ```
 
 Installs the `speck` command and the Python library from this checkout (Python 3.12+). The `speck` name on PyPI is a different project. Configure through environment variables
-(see [.env.example](.env.example))
-Speaker embeddings (TitaNet-small) and the other ONNX models are fetched from HuggingFace on first use.
+(see [.env.example](.env.example)).
 Default models: Parakeet for ASR, Whisper large-v3-turbo and Nemotron (streaming) as alternatives, TitaNet-small for speakers ([benchmarks](docs/models_report.md)).
+
+### Download the models
+
+Nothing is bundled: models are fetched from HuggingFace on first use (cached in `~/.cache/huggingface`). Pre-fetch them to avoid a slow first run or to work offline:
+
+```bash
+uv run python scripts/download_assets.py --models        # speaker, VAD and segmentation ONNX models
+uv run hf download nvidia/parakeet-tdt-0.6b-v3           # default ASR engine
+uv run speck transcribe samples/bcn_weather.mp3          # verify the setup
+```
+
+Whisper and Nemotron downloads, tokens, offline mode: [docs/download_models.md](docs/download_models.md).
 
 ## CLI
 
@@ -123,5 +134,6 @@ uv run pytest
 Read these before working on the related area:
 
 - [docs/metrics.md](docs/metrics.md): speaker and TTS evaluation pipelines (`speck evaluate`), metrics, report files.
+- [docs/download_models.md](docs/download_models.md): model repos, pre-fetch commands, HuggingFace token, offline use.
 - [docs/data_and_models.md](docs/data_and_models.md): downloading models and datasets, audio format, dataset layout.
 - [docs/models_report.md](docs/models_report.md): selected default models and their measured WER/RTF/EER, plus historic benchmarks of earlier runs and replaced models (kept as reference data).
