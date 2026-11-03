@@ -10,7 +10,7 @@ Model-agnostic speech recognition with real-time streaming and live speaker labe
 
 ```bash
 uv sync                 # or: pip install -e .
-uv run speck --help
+uv run speck --help     # or: python -m speck --help
 ```
 
 Installs the `speck` command and the Python library from this checkout (Python 3.12+). The `speck` name on PyPI is a different project. Configure through environment variables
@@ -26,10 +26,13 @@ Default models: Parakeet for ASR, Whisper large-v3-turbo and Nemotron (streaming
 | `speck stream AUDIO` | Streaming transcription of a file (`--simulate-realtime`) |
 | `speck mic` | Live microphone transcription |
 | `speck speakers [AUDIO]` | Live "who is speaking", no transcription |
+| `speck identify AUDIO` | Which enrolled speaker is this (`--stream`: chunk by chunk over a sliding window) |
+| `speck diarize AUDIO` | Offline "who spoke when" (pyannote segmentation-3.0 + TitaNet-small) |
 | `speck listen` | Auto-transcribe calls and videos playing on this machine (Linux) |
 | `speck mixed` | Mic + system audio: `[You]` vs. `[Remote]` (Linux) |
 | `speck benchmark AUDIO` | Real-time factor per latency preset |
 | `speck models` / `speck languages` | List engines / languages |
+| `speck evaluate` | Speaker / TTS metric pipelines, reports in `reports/` ([docs](docs/metrics.md)) |
 
 Common flags (`speck <command> --help` for the rest):
 
@@ -39,7 +42,8 @@ Common flags (`speck <command> --help` for the rest):
 | `--language CODE` | Locale like `en-US`, or `auto`; default is `SPECK_LANGUAGE` (`auto`) |
 | `--lookahead 0\|3\|6\|13` | Latency preset: 80 / 320 / 560 (default) / 1120 ms. Lower is lower latency, higher is more accurate. Only Nemotron uses it; other engines ignore it |
 | `--speakers` | Label speakers (`mic`, `listen`; already on in `mixed`, `--no-speakers` turns it off) |
-| `--enroll NAME=WAV` | Known voice sample, repeatable (also on `speakers`) |
+| `--enroll NAME=WAV` | Known voice sample, repeatable (also on `speakers`, `identify`, `diarize`) |
+| `--enroll-dir DIR` | `identify` / `diarize`: enroll the first WAV of each `DIR/<speaker>/` (default `data`) |
 | `--speaker-threshold X` | Match strictness, default 0.35. Raise if people get merged, lower if one is split |
 | `--num-speakers N` | Cap on speakers discovered |
 
@@ -69,7 +73,7 @@ session.push_audio(chunk)
 session.finish(); session.join()
 ```
 
-Add your own engine by subclassing `BaseASREngine` and calling `speck.factory.register_engine(alias, cls)`. An unrecognized model string falls back to Parakeet.
+Add your own engine by subclassing `speck.asr.BaseASREngine` and calling `speck.register_engine(alias, cls)`. An unrecognized model string falls back to Parakeet.
 
 ## Lowering the error rate
 
@@ -93,11 +97,20 @@ python scripts/asr_benchmark.py --models parakeet whisper-large-v3-turbo nemotro
 python scripts/speaker_benchmark.py --models nemo_en_titanet_small.onnx nemo_en_titanet_large.onnx   # speaker-embedding EER; writes reports/speaker_benchmark.json
 ```
 
-## Speaker tool and benchmarks
+## Project layout
 
-`main.py` is a separate speaker-recognition tool (pyannote segmentation-3.0 + TitaNet-small, the same embeddings as the live classifier used by the `speck` CLI):
-`enroll`, `identify`, `diarize`, `stream` and `evaluate`. Enrolled profiles live in memory only, and `main.py` pre-enrolls the first WAV of each `data/<speaker>/` folder.
-`scripts/` holds `download_assets.py`, `asr_benchmark.py` and `speaker_benchmark.py`.
+```
+src/speck/
+├── asr/          BaseASREngine, engines/ (parakeet, whisper, nemotron, voxtral), registry, hotword + ROVER post-processing
+├── speakers/     embeddings (TitaNet-small), live online classifier, offline recognizer / diarizer
+├── streaming/    Silero VAD, push-based live sessions, mic + system audio mixing
+├── capture/      microphone and PulseAudio / PipeWire sources
+├── evaluation/   speaker, transcript (WER/CER) and TTS metrics and pipelines
+├── cli/          `speck` command: app.py (entry point), options.py, commands/<domain>.py
+├── audio.py      array helpers    hub.py  model assets on HuggingFace    config.py  .env settings
+```
+
+`scripts/` holds the dataset and benchmark tools: `download_assets.py`, `asr_benchmark.py` and `speaker_benchmark.py`.
 
 ## Tests
 
@@ -109,6 +122,6 @@ uv run pytest
 
 Read these before working on the related area:
 
-- [docs/metrics.md](docs/metrics.md): speaker and TTS evaluation pipelines (`main.py evaluate`), metrics, report files.
+- [docs/metrics.md](docs/metrics.md): speaker and TTS evaluation pipelines (`speck evaluate`), metrics, report files.
 - [docs/data_and_models.md](docs/data_and_models.md): downloading models and datasets, audio format, dataset layout.
 - [docs/models_report.md](docs/models_report.md): selected default models and their measured WER/RTF/EER, plus historic benchmarks of earlier runs and replaced models (kept as reference data).

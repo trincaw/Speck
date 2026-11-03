@@ -16,9 +16,9 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-from speck.metrics import compute_eer
-from speck.speakers import EMBEDDING_REPO, SpeakerEmbedder
-from speck.utils import resolve_hf_file
+from speck.evaluation.speaker_metrics import compute_eer
+from speck.hub import EMBEDDING_REPO, resolve_hf_file
+from speck.speakers import SpeakerEmbedder
 
 
 def load_items(data_dir, limit):

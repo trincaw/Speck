@@ -1,12 +1,12 @@
 # Metrics & Evaluation
 
-Two pipelines, run through `main.py evaluate` (it always loads the pyannote speaker models first, even for `--task tts`). Dataset layout and assets: [data_and_models.md](data_and_models.md). Observed results: [models_report.md](models_report.md).
+Two pipelines, run through `speck evaluate` (the speaker models are only loaded for `--task speaker` / `all`). Dataset layout and assets: [data_and_models.md](data_and_models.md). Observed results: [models_report.md](models_report.md).
 
 ```bash
 python scripts/download_assets.py --all
-python main.py evaluate --task speaker --data-dir data/ --output-dir reports/
-python main.py evaluate --task tts --output-dir reports/
-python main.py evaluate                      # both (--task all, default)
+speck evaluate --task speaker --data-dir data/ --output-dir reports/
+speck evaluate --task tts --output-dir reports/
+speck evaluate                      # both (--task all, default)
 uv run pytest tests/test_tts_metrics.py -v
 ```
 
@@ -23,7 +23,7 @@ pyannote segmentation-3.0 + TitaNet-small (match threshold 0.35, diarization clu
 
 ## TTS & intelligibility (`--task tts`, `en-US` and `it-IT`)
 
-`main.py evaluate --task tts` does not read any dataset: it scores two built-in synthetic pairs (a sine-tone "reference" and a slightly scaled, noised copy, one per locale), with the ASR text set equal to the prompt. WER/CER are therefore trivially 0 and the numbers only confirm the pipeline runs. To score real synthesis, pass items to `TTSMetricsPipeline.evaluate_dataset` (keys: `ref_audio`, `syn_audio`, `text`, optional `asr_text`, `language`, `synthesis_time_sec`) and then `export_reports`.
+`speck evaluate --task tts` does not read any dataset: it scores two built-in synthetic pairs (a sine-tone "reference" and a slightly scaled, noised copy, one per locale), with the ASR text set equal to the prompt. WER/CER are therefore trivially 0 and the numbers only confirm the pipeline runs. The pairs come from `speck.evaluation.tts.synthetic_benchmark()`. To score real synthesis, pass items to `TTSMetricsPipeline.evaluate_dataset` (keys: `ref_audio`, `syn_audio`, `text`, optional `asr_text`, `language`, `synthesis_time_sec`) and then `export_reports`.
 
 | Group | Metrics |
 |---|---|

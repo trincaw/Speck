@@ -9,7 +9,7 @@ import pytest
 
 from speck.asr import BaseASREngine, NemotronASR, VoxtralASR, get_engine
 from speck.config import load_env_file
-from speck.factory import _ENGINE_REGISTRY, list_available_models, register_engine
+from speck.asr.registry import _ENGINE_REGISTRY, list_available_models, register_engine
 
 
 def test_env_loader_parses_properly(tmp_path):
@@ -146,8 +146,8 @@ def test_voxtral_stream_transcribe():
 
 
 def test_factory_resolves_whisper_and_parakeet():
-    from speck.engines.parakeet import ParakeetASR
-    from speck.engines.whisper import WhisperASR
+    from speck.asr.engines.parakeet import ParakeetASR
+    from speck.asr.engines.whisper import WhisperASR
 
     for alias, model_id in [("whisper-large-v3-turbo", "large-v3-turbo"), ("whisper", "large-v3-turbo")]:
         engine = get_engine(alias)
@@ -157,7 +157,7 @@ def test_factory_resolves_whisper_and_parakeet():
 
 
 def test_correct_vocabulary_snaps_near_misses_only():
-    from speck.postprocess import correct_vocabulary
+    from speck.asr.postprocess import correct_vocabulary
 
     assert correct_vocabulary("Call Avale support", ["Avvale"]) == "Call Avvale support"
     assert correct_vocabulary("deploy on Kubernetis", ["Kubernetes"]) == "deploy on Kubernetes"
@@ -166,7 +166,7 @@ def test_correct_vocabulary_snaps_near_misses_only():
 
 
 def test_rover_majority_vote():
-    from speck.postprocess import rover
+    from speck.asr.postprocess import rover
 
     votes = ["the cat sat on a mat", "the cat sat on the mat", "the bat sat on the mat today", "the cat sat on the mat"]
     assert rover(votes) == "the cat sat on the mat"
@@ -175,7 +175,7 @@ def test_rover_majority_vote():
 
 
 def test_normalize_audio_scales_to_peak_and_spares_silence():
-    from speck.utils import normalize_audio
+    from speck.audio import normalize_audio
 
     quiet = (0.2 * np.sin(np.linspace(0, 200, 16000)) + 0.01).astype(np.float32)
     loud = normalize_audio(quiet)

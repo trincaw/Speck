@@ -16,7 +16,7 @@ import os
 import numpy as np
 import pytest
 
-from speck.metrics import (
+from speck.evaluation import (
     MCD_FACTOR,
     TTSMetricsPipeline,
     compute_cer,

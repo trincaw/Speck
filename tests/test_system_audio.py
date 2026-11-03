@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from speck.system_audio import Activity, ActivityDetector, AudioStream, SystemAudioCapture, SystemAudioListener
+from speck.capture.system_audio import Activity, ActivityDetector, AudioStream, SystemAudioCapture, SystemAudioListener
 
 
 def _pactl_item(index, device, app, binary="", pid="1", corked=False, media="playStream", role=None):

@@ -13,10 +13,15 @@ import zlib
 
 def download_models():
     """Pre-fetch the ONNX models Speck loads (speaker embeddings, segmentation, VAD) into the HF cache."""
-    from speck.pyannote import PYANNOTE_SEGMENTATION_FILE, PYANNOTE_SEGMENTATION_REPO
-    from speck.speakers import EMBEDDING_FILE, EMBEDDING_REPO
-    from speck.utils import resolve_hf_file
-    from speck.vad import VAD_FILE, VAD_REPO
+    from speck.hub import (
+        EMBEDDING_FILE,
+        EMBEDDING_REPO,
+        PYANNOTE_SEGMENTATION_FILE,
+        PYANNOTE_SEGMENTATION_REPO,
+        VAD_FILE,
+        VAD_REPO,
+        resolve_hf_file,
+    )
 
     for repo, filename in [(EMBEDDING_REPO, EMBEDDING_FILE), (PYANNOTE_SEGMENTATION_REPO, PYANNOTE_SEGMENTATION_FILE), (VAD_REPO, VAD_FILE)]:
         try:

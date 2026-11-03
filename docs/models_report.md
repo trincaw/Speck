@@ -11,8 +11,8 @@ Raw results live in `reports/` (git-ignored); historic sources in `reports/histo
 | ASR (default, `SPECK_MODEL`) | `parakeet` (Parakeet-TDT v3 0.6B) | every `speck` command, unrecognized `--model` values | Best WER, CER and RTF of all engines |
 | ASR, multilingual control | `whisper` (large-v3-turbo) | `--model whisper` | Second-best WER; language lock and hotword biasing. Beats large-v3 on accuracy and speed |
 | ASR, lowest latency | `nemotron` (Nemotron 3.5 streaming 0.6B) | `--model nemotron`, `speck benchmark` | Only native streaming engine (`--lookahead` 80-1120 ms) |
-| Speaker embeddings | TitaNet-small | live `--speakers`, `main.py`, SECS | Lowest EER of 9 candidates, 2nd-fastest |
-| Diarization clustering threshold | 0.7 (TitaNet-small) | `main.py diarize` | Speaker count right in 15/16 test conversations |
+| Speaker embeddings | TitaNet-small | live `--speakers`, `identify` / `diarize`, SECS | Lowest EER of 9 candidates, 2nd-fastest |
+| Diarization clustering threshold | 0.7 (TitaNet-small) | `speck diarize` | Speaker count right in 15/16 test conversations |
 
 ## ASR: LibriSpeech test-clean subset (2026-11-02)
 
@@ -39,16 +39,16 @@ Same 723 files, 18 speakers. EER over all pairs, on whole utterances and on cent
 | `nemo_en_titanet_large` | 0.26% | 1.39% | 0.38 / 0.28 | 100% | 0.0271 |
 | `3dspeaker_campplus_sv_zh_en_16k-common_advanced` | 0.49% | 1.59% | 0.43 / 0.33 | 99.7% | 0.0094 |
 | `3dspeaker_eres2net_sv_en_voxceleb_16k` | 1.28% | 3.05% | 0.38 / 0.27 | 98.4% | 0.0272 |
-| `wespeaker_en_voxceleb_resnet34_LM` (previous `main.py` model) | 9.16% | 18.73% | 0.73 / 0.60 | 68.5% | 0.0218 |
+| `wespeaker_en_voxceleb_resnet34_LM` (previous speaker-tool model) | 9.16% | 18.73% | 0.73 / 0.60 | 68.5% | 0.0218 |
 | `wespeaker_en_voxceleb_resnet152_LM` | 11.69% | 19.88% | 0.79 / 0.66 | 64.5% | 0.0721 |
 | `wespeaker_en_voxceleb_resnet293_LM` | 15.19% | 22.20% | 0.84 / 0.72 | 56.6% | 0.1540 |
 | `3dspeaker_campplus_sv_en_voxceleb_16k` | 36.70% | 12.74% | 0.51 / 0.52 | 46.5% | 0.0095 |
 | `wespeaker_en_voxceleb_CAM++_LM` | 44.53% | 36.50% | 0.44 / 0.76 | 6.7% | 0.0095 |
 
 - WeSpeaker and the VoxCeleb CAM++ exports score far below their published numbers through sherpa-onnx (likely a front-end mismatch); measured here as used by Speck.
-- TitaNet-small's 1.5 s EER threshold (0.31) is consistent with the live classifier default `SPECK_SPEAKER_THRESHOLD=0.35`, which is also now the `main.py` match threshold (was 0.65 / 0.75, tuned to ResNet34's higher score scale).
+- TitaNet-small's 1.5 s EER threshold (0.31) is consistent with the live classifier default `SPECK_SPEAKER_THRESHOLD=0.35`, which is also now the `speck identify` match threshold (was 0.65 / 0.75, tuned to ResNet34's higher score scale).
 
-### Diarization (`main.py diarize`)
+### Diarization (`speck diarize`)
 
 16 synthetic conversations of 2-4 LibriSpeech speakers (2 turns each, 0.3 s gaps), `num_speakers=-1`. Frame accuracy after optimal label mapping.
 
@@ -61,7 +61,7 @@ Same 723 files, 18 speakers. EER over all pairs, on whole utterances and on cent
 | TitaNet-small | 0.8 | 0.847 | 81% |
 | TitaNet-small | 0.9 | 0.816 | 62% |
 
-### `main.py evaluate --task speaker` (CMU Arctic, 2026-11-02)
+### `speck evaluate --task speaker` (CMU Arctic, 2026-11-02)
 
 pyannote segmentation-3.0 + TitaNet-small, 12 test samples, 3 speakers (bdl, clb, slt). Source: `reports/EVALUATION_REPORT.md`.
 
@@ -119,7 +119,7 @@ Nemotron streaming RTF by latency preset (11.04 s clip):
 
 ### Speaker recognition with WeSpeaker ResNet34 (2026-10-26)
 
-Previous `main.py` model (pyannote segmentation-3.0 + WeSpeaker ResNet34), CMU Arctic, 12 test samples, 3 speakers. Source: `reports/historic/EVALUATION_REPORT_2026-10-26_resnet34.md`.
+Previous speaker-tool model (pyannote segmentation-3.0 + WeSpeaker ResNet34), CMU Arctic, 12 test samples, 3 speakers. Source: `reports/historic/EVALUATION_REPORT_2026-10-26_resnet34.md`.
 
 | Metric | Result |
 |---|---|

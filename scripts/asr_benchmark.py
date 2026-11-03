@@ -12,10 +12,9 @@ import os
 import time
 from pathlib import Path
 
+from speck.asr import get_engine, rover
 from speck.config import load_env_file
-from speck.factory import get_engine
-from speck.postprocess import rover
-from speck.tts_metrics import compute_cer, compute_wer
+from speck.evaluation.text import compute_cer, compute_wer
 
 
 def load_manifest(data_dir):

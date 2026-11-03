@@ -3,8 +3,8 @@
 import numpy as np
 from transformers.audio_utils import load_audio
 
-from speck.mixed import EchoGate, MixedSession, TranscriptMixer
-from speck.system_audio import DualCapture
+from speck.streaming.mixed import EchoGate, MixedSession, TranscriptMixer
+from speck.capture.system_audio import DualCapture
 
 SR = 16000
 

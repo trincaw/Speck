@@ -3,7 +3,7 @@ import json
 import pytest
 import numpy as np
 
-from speck.metrics import (
+from speck.evaluation import (
     compute_eer,
     compute_min_dcf,
     compute_roc_curve,
@@ -12,7 +12,7 @@ from speck.metrics import (
     compute_latency_percentiles,
     compute_rtf
 )
-from speck.metrics_pipeline import SpeakerMetricsPipeline
+from speck.evaluation.speaker_pipeline import SpeakerMetricsPipeline
 
 def test_compute_eer_perfect_separation():
     # Perfectly separated scores: targets all > nontargets
