@@ -4,7 +4,7 @@
 
 # Speck
 
-Model-agnostic speech recognition with real-time streaming and live speaker labels.
+Model-agnostic linux speech recognition with real-time streaming and live speaker labels.
 
 ## Install
 
