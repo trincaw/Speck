@@ -11,7 +11,8 @@ from pathlib import Path
 from rich.table import Table
 
 from speck.cli.options import Options, load_engine, speaker_factory
-from speck.cli.ui import console, print_token, print_transcript, save_transcript, wait_for_interrupt
+from speck.cli.ui import console, print_token, print_transcript, save_transcript, stop_hint, wait_for_interrupt
+from speck.streaming.gate import TranscriptionGate
 
 
 def _require_system_audio():
@@ -24,22 +25,36 @@ def _require_system_audio():
     return sa
 
 
+def _new_gate() -> TranscriptionGate:
+    """The Space-key switch: announces every change in the terminal."""
+
+    def announce(active: bool) -> None:
+        if active:
+            console.print("\n[bold green]▶ Transcribing[/bold green] [dim](Space to pause)[/dim]")
+        else:
+            console.print("\n[bold yellow]⏸ Paused[/bold yellow] [dim](Space to resume)[/dim]")
+
+    return TranscriptionGate(on_change=announce)
+
+
 def handle_mic(args: argparse.Namespace) -> None:
     from speck.capture.microphone import open_microphone
 
     engine = load_engine(args)
     console.print(f"[bold]Language:[/bold] [yellow]{args.language}[/yellow]")
     new_classifier = speaker_factory(args, engine.sampling_rate) if args.speakers else None
-    console.print("[bold green]Listening... press Ctrl+C to stop.[/bold green]\n")
+    gate = _new_gate()
+    console.print(f"[bold green]Listening... {stop_hint(gate)}[/bold green]\n")
 
     session = engine.create_stream_session(
         language=args.language,
         on_token=print_token,
         speakers=new_classifier() if new_classifier else None,
+        gate=gate,
     ).start()
     try:
         with open_microphone(session.push_audio, engine.sampling_rate):
-            wait_for_interrupt("Stopping microphone capture...")
+            wait_for_interrupt("Stopping microphone capture...", gate)
     finally:
         session.finish()
         session.join(timeout=30)
@@ -57,12 +72,14 @@ def handle_listen(args: argparse.Namespace) -> None:
     if save_dir:
         save_dir.mkdir(parents=True, exist_ok=True)
     new_classifier = speaker_factory(args, engine.sampling_rate) if args.speakers else None
+    gate = _new_gate()  # shared by every recording, so a pause also covers the ones that start later
 
     def new_session():
         return engine.create_stream_session(
             language=args.language,
             on_token=print_token,
             speakers=new_classifier() if new_classifier else None,  # speakers are per recording
+            gate=gate,
         )
 
     def on_start(rec: sa.Recording) -> None:
@@ -92,16 +109,14 @@ def handle_listen(args: argparse.Namespace) -> None:
     target = args.source or (", ".join(args.app) if args.app else "any application")
     console.print(f"[bold]Watching:[/bold] [cyan]{target}[/cyan]  [bold]Mic:[/bold] [yellow]{args.mic}[/yellow]  "
                   f"[bold]Idle timeout:[/bold] {args.idle_timeout:.0f}s")
-    console.print("[bold green]Waiting for audio... press Ctrl+C to stop.[/bold green]")
+    console.print(f"[bold green]Waiting for audio... {stop_hint(gate)}[/bold green]")
 
     stop = threading.Event()
     worker = threading.Thread(target=listener.run, args=(stop,), daemon=True)
     worker.start()
     try:
-        while worker.is_alive():
-            worker.join(0.2)
-    except KeyboardInterrupt:
-        console.print("\n[yellow]Stopping system audio capture...[/yellow]")
+        wait_for_interrupt("Stopping system audio capture...", gate, until=lambda: not worker.is_alive())
+    finally:
         stop.set()
         worker.join(timeout=60)
 
@@ -113,6 +128,7 @@ def handle_mixed(args: argparse.Namespace) -> None:
     sa = _require_system_audio()
     engine = load_engine(args)
     new_classifier = speaker_factory(args, engine.sampling_rate) if args.speakers else None
+    gate = _new_gate()
     session = MixedSession(
         engine,
         me_label=args.me,
@@ -123,6 +139,7 @@ def handle_mixed(args: argparse.Namespace) -> None:
         on_token=print_token,
         speakers=new_classifier() if new_classifier else None,
         language=args.language,
+        gate=gate,
     ).start()
     capture = sa.DualCapture(session.push_mic, session.push_system, mic_device=args.mic_source,
                              system_device=args.system_source, sample_rate=engine.sampling_rate)
@@ -131,10 +148,10 @@ def handle_mixed(args: argparse.Namespace) -> None:
     console.print(f"[bold]Mic:[/bold] [cyan]{args.mic_source}[/cyan] → [{args.me}]  "
                   f"[bold]System:[/bold] [cyan]{args.system_source}[/cyan] → {remote}  "
                   f"[bold]Echo guard:[/bold] {'on' if args.echo_guard else 'off'}")
-    console.print("[bold green]Listening... press Ctrl+C to stop.[/bold green]\n")
+    console.print(f"[bold green]Listening... {stop_hint(gate)}[/bold green]\n")
     capture.start()
     try:
-        wait_for_interrupt("Stopping capture...")
+        wait_for_interrupt("Stopping capture...", gate)
     finally:
         capture.stop()
         session.finish()

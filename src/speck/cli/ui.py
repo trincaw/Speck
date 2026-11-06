@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import os
+import select
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Callable, Iterator, Optional
 
 from rich.console import Console
 from rich.markup import escape
@@ -13,10 +16,19 @@ from rich.panel import Panel
 
 from speck.config import get_model_name
 
+try:
+    import termios
+    import tty
+except ImportError:  # not a POSIX terminal: no single-key input
+    termios = tty = None
+
 if TYPE_CHECKING:
     from speck.asr.base import BaseASREngine
+    from speck.streaming.gate import TranscriptionGate
 
 console = Console()
+
+TOGGLE_KEY = " "  # pauses / resumes live transcription
 
 
 def print_banner(engine: Optional[BaseASREngine] = None) -> None:
@@ -42,10 +54,55 @@ def save_transcript(text: str, path: Path) -> None:
     console.print(f"[dim]Saved transcript to {path}[/dim]")
 
 
-def wait_for_interrupt(message: str) -> None:
-    """Block until Ctrl+C, then print `message`."""
+def keys_available() -> bool:
+    """True when single keypresses can be read from the terminal (stdin is an interactive TTY)."""
+    return termios is not None and sys.stdin is not None and sys.stdin.isatty()
+
+
+def stop_hint(gate: Optional[TranscriptionGate] = None) -> str:
+    """"press ... to stop.", mentioning the pause key when `wait_for_interrupt` will listen for it."""
+    keys = "Space to pause/resume, Ctrl+C to stop" if gate and keys_available() else "Ctrl+C to stop"
+    return f"press {keys}."
+
+
+@contextmanager
+def _keypresses(enabled: bool = True) -> Iterator[Callable[[float], str]]:
+    """Yield `read(timeout)`: the characters typed within `timeout` seconds (possibly none).
+
+    The terminal is in cbreak mode meanwhile (no echo, no Enter needed, Ctrl+C still raises
+    KeyboardInterrupt) and is always restored. Without a terminal `read` just sleeps.
+    """
+    if not (enabled and keys_available()):
+        yield lambda timeout: time.sleep(timeout) or ""
+        return
+
+    fd = sys.stdin.fileno()
+    saved = termios.tcgetattr(fd)
+
+    def read(timeout: float) -> str:
+        ready, _, _ = select.select([fd], [], [], timeout)
+        return os.read(fd, 1024).decode(errors="ignore") if ready else ""
+
+    tty.setcbreak(fd)
     try:
-        while True:
-            time.sleep(0.1)
+        yield read
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, saved)
+
+
+def wait_for_interrupt(
+    message: str,
+    gate: Optional[TranscriptionGate] = None,
+    until: Optional[Callable[[], bool]] = None,
+) -> None:
+    """Block until Ctrl+C (then print `message`) or until `until()` is true.
+
+    With a `gate`, pressing Space meanwhile pauses or resumes transcription.
+    """
+    try:
+        with _keypresses(enabled=gate is not None) as read:
+            while not (until and until()):
+                if gate and TOGGLE_KEY in read(0.1):
+                    gate.toggle()
     except KeyboardInterrupt:
         console.print(f"\n[yellow]{message}[/yellow]")

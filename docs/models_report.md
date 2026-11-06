@@ -23,7 +23,10 @@ Raw results live in `reports/` (git-ignored); historic sources in `reports/histo
 | `whisper-large-v3-turbo` | 2.26% | 0.87% | 0.0428 |
 | `whisper-large-v3` | 2.49% | 1.19% | 0.0801 |
 | `nemotron` (removed) | 3.37% | 1.16% | 0.0229 |
+| `sherpa-onnx` Parakeet-TDT v3 fp32, CUDA (removed) | 2.02% | 0.62% | 0.0140 |
+| `sherpa-onnx` Parakeet-TDT v3 int8, CPU (removed) | 2.32% | 0.83% | 0.0785 |
 
+- sherpa-onnx was implemented as an engine and run on the same 723 utterances on 2026-11-04 (`csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3`, greedy decoding; k2-fsa CUDA wheel `sherpa_onnx 1.13.8+cuda13`, the PyPI wheel is CPU-only). fp32 on the GPU ties `parakeet` on accuracy (309 vs 303 word errors, 704 of 723 utterances identical; paired bootstrap on sherpa minus parakeet WER: +0.04 pt, 95% CI -0.03 to +0.11, includes 0) and is slightly slower. The int8 export (the CPU-oriented one) is 0.34 pt worse on WER; int8 gains nothing on CUDA (RTF 0.070 there, probably because onnxruntime has no int8 GPU kernels; not verified). Parakeet is ahead on every metric, and sherpa-onnx would add a non-PyPI CUDA wheel, a 2.5 GB fp32 export and a cache workaround (onnxruntime rejects the HF cache's symlinked external weights), so the engine was removed. Sources: `reports/historic/asr_benchmark_sherpa_fp32_cuda_2026-11-04.json`, `reports/historic/asr_benchmark_sherpa_2026-11-04.json`. The English-only Parakeet v2 export was not tested.
 - Nemotron 3.5 streaming (worst WER of the three) and Voxtral (API-only, never measured) were removed; only Parakeet and Whisper are built in.
 - `whisper-large-v3` is worse than turbo on every metric and ~2x slower; its alias was removed (still reachable by repo id, e.g. `--model Systran/faster-whisper-large-v3`).
 - `whisper-medium`/`small`/`base`/`tiny` were not re-run (too slow to justify; the historic 3-clip run below already showed no accuracy edge); their aliases were removed.

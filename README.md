@@ -63,6 +63,8 @@ speck listen --app discord --save-dir ~/transcripts     # --list shows playing a
 speck mixed --speakers --save call.txt                  # --me/--remote rename labels, --no-echo-guard with headphones
 ```
 
+In `mic`, `listen` and `mixed`, press **Space** to pause or resume transcription (Ctrl+C still stops). While paused the audio is discarded, not transcribed or saved; what you said just before pausing is still finished. In `listen` the pause also covers recordings that start later. Library: pass `gate=TranscriptionGate()` (from `speck.streaming`) to `create_stream_session` and call `gate.toggle()`.
+
 `listen` and `mixed` need PulseAudio/PipeWire (`pactl`, `parec`). `mixed` labels the microphone `[You]` and, with speakers on, remote voices `Speaker 1`, `Speaker 2`...; `[Remote]` is used only with `--no-speakers`.
 
 ## Library

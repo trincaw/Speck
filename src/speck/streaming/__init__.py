@@ -1,5 +1,6 @@
 """Live audio pipelines: VAD segmentation, push-based ASR sessions and two-channel (mic + system) mixing."""
 
+from speck.streaming.gate import TranscriptionGate
 from speck.streaming.mixed import EchoGate, MixedSession, TranscriptMixer
 from speck.streaming.sessions import (
     AudioBuffer,
@@ -19,6 +20,7 @@ __all__ = [
     "MixedSession",
     "TranscriptMixer",
     "EchoGate",
+    "TranscriptionGate",
     "VadSegmenter",
     "Utterance",
 ]

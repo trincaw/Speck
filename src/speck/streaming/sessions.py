@@ -15,6 +15,7 @@ from speck.audio import to_mono_float32
 if TYPE_CHECKING:
     from speck.asr.base import BaseASREngine
     from speck.speakers import SpeakerClassifier, SpeakerMatch
+    from speck.streaming.gate import TranscriptionGate
     from speck.streaming.vad import Utterance
 
 logger = logging.getLogger(__name__)
@@ -70,11 +71,13 @@ class BaseAudioStreamSession(ABC):
         language: str = "auto",
         skip_special_tokens: bool = True,
         on_token: Optional[Callable[[str], None]] = None,
+        gate: Optional[TranscriptionGate] = None,
     ):
         self.engine = engine
         self.language = language
         self.skip_special_tokens = skip_special_tokens
         self.on_token = on_token
+        self.gate = gate  # while off, pushed audio is replaced by silence
         self.sr = engine.sampling_rate
 
         self._buffer = AudioBuffer()
@@ -95,6 +98,8 @@ class BaseAudioStreamSession(ABC):
         if self._finished:
             return
         chunk = to_mono_float32(pcm_chunk).reshape(-1)
+        if self.gate:
+            chunk = self.gate.apply(chunk)
         with self._cond:
             self._buffer.append(chunk)
             self._cond.notify_all()
